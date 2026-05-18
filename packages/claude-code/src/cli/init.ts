@@ -18,7 +18,7 @@ import { hostname } from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { bootstrapTokenStore, DEFAULT_API_URL, errCode } from '@rubric/core';
+import { bootstrapTokenStore, DEFAULT_API_URL, errCode } from '@rubric-app/core';
 import prompts from 'prompts';
 
 import { ensureDirMode, writeFileSecure } from '../config/fs-secure.js';

@@ -14,7 +14,7 @@
 //   4. After exit, the daemon's own signal handler removes the
 //      pidfile; we don't unlink it here.
 
-import { errCode } from '@rubric/core';
+import { errCode } from '@rubric-app/core';
 
 import { defaultPaths } from '../config/paths.js';
 import { readFileSecure } from '../config/fs-secure.js';

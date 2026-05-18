@@ -24,7 +24,7 @@
 
 import * as fs from 'node:fs';
 
-import { errCode } from '@rubric/core';
+import { errCode } from '@rubric-app/core';
 
 export interface WriteFileSecureOptions {
   /** Final file mode (e.g. 0o600). Always applied via explicit chmod. */

@@ -1,8 +1,8 @@
-# @rubric/claude-code
+# @rubric-app/claude-code
 
 > Gate every Claude Code tool call through the Rubric policy engine, with a tamper-evident audit log.
 
-`@rubric/claude-code` is the official Rubric adapter for [Anthropic Claude Code](https://docs.claude.com/en/docs/claude-code). It installs a long-lived loopback daemon and patches `~/.claude/settings.json` so that every `PreToolUse` and `PostToolUse` hook routes through Rubric — your policies decide allow vs. deny, and every decision is recorded in the dashboard.
+`@rubric-app/claude-code` is the official Rubric adapter for [Anthropic Claude Code](https://docs.claude.com/en/docs/claude-code). It installs a long-lived loopback daemon and patches `~/.claude/settings.json` so that every `PreToolUse` and `PostToolUse` hook routes through Rubric — your policies decide allow vs. deny, and every decision is recorded in the dashboard.
 
 Built for security teams that want one control plane for both their production AI agents and the coding agents engineers are running on their laptops.
 
@@ -13,13 +13,13 @@ Built for security teams that want one control plane for both their production A
 Requires **Node.js 22+**.
 
 ```sh
-npm i -g @rubric/claude-code
+npm i -g @rubric-app/claude-code
 ```
 
 Or with `pnpm`:
 
 ```sh
-pnpm add -g @rubric/claude-code
+pnpm add -g @rubric-app/claude-code
 ```
 
 The package installs a single binary, `rubric`.

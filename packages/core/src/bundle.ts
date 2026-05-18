@@ -47,7 +47,7 @@ export interface BundlePollerOptions {
   /**
    * Called for any non-fatal pull error (network, 5xx, schema parse).
    * Defaults to a no-op so the daemon can attach its own pino logger
-   * without dragging a logger dependency into @rubric/core.
+   * without dragging a logger dependency into @rubric-app/core.
    */
   onError?: (err: unknown) => void;
   intervalMs?: number;

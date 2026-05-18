@@ -10,7 +10,7 @@
 // composes Evaluator + AuditSink + TokenStore externally and passes
 // them in. That keeps unit tests trivial.
 
-import { scrubSecrets, type AuditEvent, type Evaluator } from '@rubric/core';
+import { scrubSecrets, type AuditEvent, type Evaluator } from '@rubric-app/core';
 
 import { toEvaluationRequest } from './translate.js';
 import {
@@ -25,7 +25,7 @@ import {
 // can attribute calls to the Claude Code adapter.
 const FRAMEWORK_CLAUDE_CODE = 'claude-code';
 
-// `scrubSecrets` is imported from `@rubric/core`. Audit metadata
+// `scrubSecrets` is imported from `@rubric-app/core`. Audit metadata
 // redactions match the strings the core SDK redacts on its way out of
 // `safeText()` — single source of truth.
 

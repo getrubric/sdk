@@ -1,4 +1,4 @@
-// Translate Claude Code hook payloads to the shape the @rubric/core
+// Translate Claude Code hook payloads to the shape the @rubric-app/core
 // evaluator expects.
 //
 // Why this layer exists: the evaluator uses dot-pathed field names like
@@ -12,7 +12,7 @@
 // Keep this file the *only* place that knows about the Claude Code
 // payload format. Schema drift on Claude's side touches only here.
 
-import type { EvaluationRequest } from '@rubric/core';
+import type { EvaluationRequest } from '@rubric-app/core';
 
 import type { PreToolUsePayload, PostToolUsePayload } from './types.js';
 

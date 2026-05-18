@@ -1,4 +1,4 @@
-// `@rubric/core` — public API.
+// `@rubric-app/core` — public API.
 //
 // Framework-neutral runtime for Rubric SDK adapters. Four building
 // blocks compose to form a complete adapter:

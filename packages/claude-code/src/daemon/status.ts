@@ -8,12 +8,12 @@
 // across processes on the same machine, not fine for any random
 // loopback caller. Healthz remains no-auth as the lighter probe.
 
-import type { BundlePoller } from '@rubric/core';
+import type { BundlePoller } from '@rubric-app/core';
 
 const HASH_PREFIX_LENGTH = 12;
 
 /**
- * Drop / ship counters reported by the AuditSink (`@rubric/core`
+ * Drop / ship counters reported by the AuditSink (`@rubric-app/core`
  * exports `AuditSink.getStats()` returning a structurally compatible
  * shape). Defining the type here rather than re-exporting from core
  * keeps the daemon's status payload stable across core SDK versions —
@@ -38,7 +38,7 @@ export interface AuditSinkLike {
   /** Number of events currently queued, awaiting flush. */
   readonly queueSize: number;
   /**
-   * Drop / ship counters. Provided by `@rubric/core`'s `AuditSink`.
+   * Drop / ship counters. Provided by `@rubric-app/core`'s `AuditSink`.
    * Declared optional so the daemon's status builder can fall back
    * gracefully (`queueSize` + zeroed counters) against a minimal mock
    * AuditSink in tests.

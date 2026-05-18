@@ -11,7 +11,7 @@
 
 import * as fs from 'node:fs';
 
-import { errCode } from '@rubric/core';
+import { errCode } from '@rubric-app/core';
 
 import { defaultPaths } from '../config/paths.js';
 

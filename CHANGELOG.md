@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `@rubric/core` and `@rubric/claude-code` are recorded here.
+All notable changes to `@rubric-app/core` and `@rubric-app/claude-code` are recorded here.
 
 ## 0.1.0 — 2026-05-18
 
@@ -8,8 +8,8 @@ First public release.
 
 ### Added
 
-- `@rubric/claude-code` — `rubric` CLI + long-lived loopback daemon that routes Claude Code `PreToolUse` / `PostToolUse` / `SessionStart` hooks through the Rubric policy engine and audit log.
-- `@rubric/core` — framework-neutral runtime: `TokenStore`, `BundlePoller`, `AuditSink`, `Evaluator`, and `scrubSecrets` helper.
+- `@rubric-app/claude-code` — `rubric` CLI + long-lived loopback daemon that routes Claude Code `PreToolUse` / `PostToolUse` / `SessionStart` hooks through the Rubric policy engine and audit log.
+- `@rubric-app/core` — framework-neutral runtime: `TokenStore`, `BundlePoller`, `AuditSink`, `Evaluator`, and `scrubSecrets` helper.
 - macOS launchd and Linux systemd-user service installers (auto-detected by `rubric init`).
 - `rubric doctor` with six health checks covering config, daemon liveness, control-plane reachability, identity refresh, settings.json hook entries, and bundle freshness.
 - Authenticated `POST /v1/shutdown` endpoint (used by `rubric stop`); SIGTERM fallback gated behind `--force`.

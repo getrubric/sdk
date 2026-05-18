@@ -20,7 +20,7 @@
 
 import * as http from 'node:http';
 
-import { scrubSecrets } from '@rubric/core';
+import { scrubSecrets } from '@rubric-app/core';
 
 import type { Logger } from './logger.js';
 import { checkBearer } from './auth.js';

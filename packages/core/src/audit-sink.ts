@@ -50,7 +50,7 @@ export interface AuditSinkOptions {
   tokenStore: TokenStore;
   /**
    * Called for queue-full drops, ship failures, and identity revocation.
-   * No-op by default so @rubric/core stays logger-free; the daemon wraps
+   * No-op by default so @rubric-app/core stays logger-free; the daemon wraps
    * this and emits a structured pino event.
    */
   onError?: (err: unknown) => void;

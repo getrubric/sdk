@@ -93,7 +93,7 @@ export interface EvaluatorOptions {
    * observability hook so the daemon can log/alert; the deny is the
    * enforcement.
    *
-   * Defaults to a no-op so @rubric/core stays logger-free.
+   * Defaults to a no-op so @rubric-app/core stays logger-free.
    */
   onCompileError?: (err: {
     policyId: string;

@@ -1,13 +1,13 @@
-# @rubric/core
+# @rubric-app/core
 
 > Framework-neutral runtime building blocks for [Rubric](https://rubric-app.com) SDK adapters.
 
-This package is a low-level library — it is the engine behind framework-specific adapters like [`@rubric/claude-code`](https://www.npmjs.com/package/@rubric/claude-code).
+This package is a low-level library — it is the engine behind framework-specific adapters like [`@rubric-app/claude-code`](https://www.npmjs.com/package/@rubric-app/claude-code).
 
-**Most users don't install `@rubric/core` directly.** If you want to govern Claude Code, install the Claude Code adapter:
+**Most users don't install `@rubric-app/core` directly.** If you want to govern Claude Code, install the Claude Code adapter:
 
 ```sh
-npm i -g @rubric/claude-code
+npm i -g @rubric-app/claude-code
 ```
 
 ## What's in here
@@ -27,7 +27,7 @@ Plus zod schemas for `AuditEvent`, `Bundle`, `PolicyDocument`, `PolicyRule`, and
 ## Install
 
 ```sh
-npm i @rubric/core
+npm i @rubric-app/core
 ```
 
 Requires **Node.js 22+**. Native dependency on [`re2`](https://www.npmjs.com/package/re2) for non-backtracking regex evaluation in policy `matches` conditions; prebuilt binaries are available for Linux, macOS, and Windows on common architectures.

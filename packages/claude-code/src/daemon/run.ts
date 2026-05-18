@@ -16,7 +16,7 @@ import {
   errCode,
   scrubSecrets,
   type TokenStore,
-} from '@rubric/core';
+} from '@rubric-app/core';
 
 import type { Paths } from '../config/paths.js';
 

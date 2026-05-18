@@ -61,7 +61,7 @@ export interface TokenStoreOptions {
   /**
    * Called when the refresh loop hits a recoverable anomaly (e.g. an
    * unparseable `expiresAt` from the server). No-op by default so
-   * `@rubric/core` stays logger-free; the daemon wraps this and emits
+   * `@rubric-app/core` stays logger-free; the daemon wraps this and emits
    * a structured pino warning.
    */
   onWarn?: (msg: string) => void;

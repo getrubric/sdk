@@ -1,4 +1,4 @@
-// Internal helpers shared across `@rubric/core` modules. The
+// Internal helpers shared across `@rubric-app/core` modules. The
 // underscore-prefixed filename signals that callers consume these at
 // their own risk — the surface is exported from `index.ts` as a
 // convenience for the official adapter packages but is not covered by

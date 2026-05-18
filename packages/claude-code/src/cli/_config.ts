@@ -10,7 +10,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { errCode } from '@rubric/core';
+import { errCode } from '@rubric-app/core';
 import { z } from 'zod';
 
 import { readFileSecure, writeFileSecure } from '../config/fs-secure.js';

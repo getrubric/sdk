@@ -6,15 +6,15 @@ This repository hosts two npm packages:
 
 | Package | What it's for |
 | --- | --- |
-| [`@rubric/claude-code`](./packages/claude-code) | Drop-in adapter that routes every Anthropic Claude Code tool call through Rubric. One command (`rubric init`) installs a loopback daemon and patches `~/.claude/settings.json`. |
-| [`@rubric/core`](./packages/core) | Framework-neutral runtime building blocks: agent identity, policy bundle polling, audit sink, policy evaluator. Use this when building adapters for other agent frameworks. |
+| [`@rubric-app/claude-code`](./packages/claude-code) | Drop-in adapter that routes every Anthropic Claude Code tool call through Rubric. One command (`rubric init`) installs a loopback daemon and patches `~/.claude/settings.json`. |
+| [`@rubric-app/core`](./packages/core) | Framework-neutral runtime building blocks: agent identity, policy bundle polling, audit sink, policy evaluator. Use this when building adapters for other agent frameworks. |
 
 ## Quick start
 
 You probably want the Claude Code adapter:
 
 ```sh
-npm i -g @rubric/claude-code
+npm i -g @rubric-app/claude-code
 rubric init
 ```
 
@@ -25,8 +25,8 @@ You'll need an enrollment token from your Rubric dashboard at [app.rubric-app.co
 ```
 .
 ├── packages/
-│   ├── core/          # @rubric/core
-│   └── claude-code/   # @rubric/claude-code
+│   ├── core/          # @rubric-app/core
+│   └── claude-code/   # @rubric-app/claude-code
 ├── CHANGELOG.md
 └── pnpm-workspace.yaml
 ```
@@ -45,7 +45,7 @@ Each package has its own README with internals and test coverage notes.
 
 ## Releases
 
-Released to npm under the `@rubric` scope. See [CHANGELOG.md](./CHANGELOG.md) for version history. Each release is tagged in this repository.
+Released to npm under the `@rubric-app` scope. See [CHANGELOG.md](./CHANGELOG.md) for version history. Each release is tagged in this repository.
 
 ## Security
 

@@ -1,4 +1,4 @@
-// `@rubric/claude-code` — Claude Code hook adapter.
+// `@rubric-app/claude-code` — Claude Code hook adapter.
 //
 // Public library surface. The actual binary is `cli/index.ts` (see
 // `bin` in package.json); this file is for programmatic consumers.

@@ -14,7 +14,7 @@
 
 import * as fs from 'node:fs';
 
-import { errCode } from '@rubric/core';
+import { errCode } from '@rubric-app/core';
 
 import { writeFileSecure } from '../config/fs-secure.js';
 import { defaultPaths } from '../config/paths.js';

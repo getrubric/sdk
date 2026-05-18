@@ -1,0 +1,19 @@
+# Build output
+dist/
+*.tsbuildinfo
+
+# Deps
+node_modules/
+
+# Logs
+*.log
+pnpm-debug.log*
+
+# Editor / IDE
+.specstory/
+.cursorindexingignore
+.idea/
+.vscode/
+
+# macOS
+.DS_Store

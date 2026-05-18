@@ -2,6 +2,12 @@
 
 All notable changes to `@rubric-app/core` and `@rubric-app/claude-code` are recorded here.
 
+## 0.1.1 — 2026-05-18
+
+### Fixed
+
+- Published `@rubric-app/claude-code@0.1.0` shipped with a literal `"workspace:*"` dependency on `@rubric-app/core`, causing `npm install -g @rubric-app/claude-code` to fail with `EUNSUPPORTEDPROTOCOL`. `0.1.1` resolves the dependency to a concrete version. `0.1.0` is deprecated on npm.
+
 ## 0.1.0 — 2026-05-18
 
 First public release.

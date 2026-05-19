@@ -57,7 +57,7 @@ export async function runUninstall(options: UninstallOptions = {}): Promise<void
   // If the file is malformed JSON we back it up and write a minimal
   // valid settings ({}) so the bearer token never lingers on disk
   // after uninstall.
-  await unpatchSettings(paths.claudeSettingsFile);
+  await unpatchSettings(paths.claudeSettingsFile, paths.ensureDaemonScriptFile);
 
   // ---- Remove config dir --------------------------------------------------
   try {
@@ -84,7 +84,10 @@ export async function runUninstall(options: UninstallOptions = {}): Promise<void
   }
 }
 
-async function unpatchSettings(settingsFile: string): Promise<void> {
+async function unpatchSettings(
+  settingsFile: string,
+  ensureDaemonScriptPath: string,
+): Promise<void> {
   let raw: string;
   try {
     raw = fs.readFileSync(settingsFile, 'utf8');
@@ -138,7 +141,7 @@ async function unpatchSettings(settingsFile: string): Promise<void> {
     return;
   }
 
-  const cleaned = removeRubricHooks(parsed);
+  const cleaned = removeRubricHooks(parsed, { ensureDaemonScriptPath });
   // Atomic write-rename, refuse symlinks, explicit chmod after write
   // so 0600 sticks (the user may have had this file at 0644 before init).
   writeFileSecure(settingsFile, JSON.stringify(cleaned, null, 2) + '\n', {

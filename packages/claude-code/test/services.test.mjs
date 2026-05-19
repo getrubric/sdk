@@ -40,6 +40,10 @@ test('buildLaunchdService: produces valid plist with the right label and paths',
   assert.ok(spec.plistContent.includes('<string>daemon</string>'));
   assert.ok(spec.plistContent.includes('<key>KeepAlive</key>\n    <true/>'));
   assert.ok(spec.plistContent.includes('<key>RunAtLoad</key>\n    <true/>'));
+  assert.ok(
+    spec.plistContent.includes('<key>ThrottleInterval</key>\n    <integer>2</integer>'),
+    'ThrottleInterval must be set so a kill-then-restart respawns within ~2s',
+  );
   assert.ok(spec.plistContent.includes(FAKE_PATHS.logFile));
 });
 

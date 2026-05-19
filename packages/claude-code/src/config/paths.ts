@@ -22,6 +22,13 @@ export interface Paths {
   logFile: string;
   /** `~/.claude/settings.json` — Claude Code's user settings. */
   claudeSettingsFile: string;
+  /**
+   * Shell script the Claude Code hook invokes before each Rubric http
+   * hook. Curls the daemon's `/healthz` and, on miss, kicks the
+   * service via the platform's service manager so a downed daemon
+   * self-heals before the http hook fires.
+   */
+  ensureDaemonScriptFile: string;
 }
 
 /**
@@ -51,5 +58,6 @@ export function defaultPaths(home: string = os.homedir(), platform: NodeJS.Platf
     daemonPortFile: path.join(configDir, 'daemon.port'),
     logFile: path.join(logBase, 'claude-code.log'),
     claudeSettingsFile: path.join(home, '.claude', 'settings.json'),
+    ensureDaemonScriptFile: path.join(configDir, 'ensure-daemon.sh'),
   };
 }

@@ -62,6 +62,17 @@ export function buildLaunchdService(options: BuildLaunchdOptions): LaunchdServic
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <!--
+        ThrottleInterval=2 mirrors systemd's RestartSec=2 in the
+        sibling unit file. The launchd default is 10s, which makes a
+        kill-then-restart wait the full window before respawning — bad
+        UX for the hook auto-revive path. 2s is short enough that a
+        Claude Code tool call sees the daemon back before its timeout
+        expires, and long enough that a hard-failing daemon can't
+        spin the CPU.
+    -->
+    <key>ThrottleInterval</key>
+    <integer>2</integer>
     <key>ProcessType</key>
     <string>Background</string>
     <key>StandardOutPath</key>

@@ -25,6 +25,8 @@ import { ensureDirMode, writeFileSecure } from '../config/fs-secure.js';
 import { defaultPaths, type Paths } from '../config/paths.js';
 import { installService } from '../config/services/index.js';
 import { applyRubricHooks } from '../config/settings-json.js';
+import { writeEnsureDaemonScript } from '../config/ensure-daemon-script.js';
+import { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT } from '../daemon/server.js';
 
 import {
   configExists,
@@ -113,9 +115,20 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
   writeFileSecure(paths.daemonTokenFile, daemonToken + '\n', { mode: 0o600 });
   process.stdout.write(`${ok(`wrote ${dim(paths.daemonTokenFile)} (0600)`)}\n`);
 
+  // ---- Write ensure-daemon hook script -----------------------------------
+  // The shell script is invoked by Claude Code's `command`-type hook
+  // before each Rubric http hook. It curls the daemon's /healthz and,
+  // on miss, kicks the platform service manager so a downed or hung
+  // daemon self-revives without user intervention.
+  writeEnsureDaemonScript(paths.ensureDaemonScriptFile, {
+    daemonHost: DEFAULT_DAEMON_HOST,
+    daemonPort: DEFAULT_DAEMON_PORT,
+  });
+  process.stdout.write(`${ok(`wrote ${dim(paths.ensureDaemonScriptFile)} (0755)`)}\n`);
+
   // ---- Patch ~/.claude/settings.json --------------------------------------
   if (!options.noSettingsPatch) {
-    patchClaudeSettings(paths.claudeSettingsFile, daemonToken);
+    patchClaudeSettings(paths.claudeSettingsFile, daemonToken, paths.ensureDaemonScriptFile);
     process.stdout.write(`${ok(`patched ${dim(paths.claudeSettingsFile)}`)}\n`);
   } else {
     process.stdout.write(`${info(`skipped settings.json patch (--no-settings-patch)`)}\n`);
@@ -232,7 +245,11 @@ async function collectConfig(options: InitOptions, paths: Paths): Promise<Persis
   };
 }
 
-function patchClaudeSettings(settingsFile: string, daemonToken: string): void {
+function patchClaudeSettings(
+  settingsFile: string,
+  daemonToken: string,
+  ensureDaemonScriptPath: string,
+): void {
   fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
   let existing: unknown = {};
   try {
@@ -246,7 +263,10 @@ function patchClaudeSettings(settingsFile: string, daemonToken: string): void {
       );
     }
   }
-  const patched = applyRubricHooks(existing, { daemonToken });
+  const patched = applyRubricHooks(existing, {
+    daemonToken,
+    ensureDaemonScriptPath,
+  });
   // writeFileSecure does an explicit chmod after write (so 0600 sticks
   // on overwrite of a pre-existing 0644 file), refuses symlink targets
   // via O_NOFOLLOW, and `atomic: true` write-renames a temp file so a

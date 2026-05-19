@@ -178,3 +178,86 @@ test('apply gracefully handles a non-object input', () => {
   assert.deepEqual(applyRubricHooks(undefined, { daemonToken: TOK }), applyRubricHooks({}, { daemonToken: TOK }));
   assert.deepEqual(applyRubricHooks([], { daemonToken: TOK }), applyRubricHooks({}, { daemonToken: TOK }));
 });
+
+// ---- ensure-daemon command hook ---------------------------------------------
+
+const SCRIPT_PATH = '/home/test/.config/rubric/ensure-daemon.sh';
+
+test('apply with ensureDaemonScriptPath prepends a command hook before the http hook', () => {
+  const out = applyRubricHooks({}, { daemonToken: TOK, ensureDaemonScriptPath: SCRIPT_PATH });
+  for (const evt of ['PreToolUse', 'PostToolUse', 'SessionStart']) {
+    const inner = out.hooks[evt][0].hooks;
+    assert.equal(inner.length, 2, `${evt}: expected command + http`);
+    assert.equal(inner[0].type, 'command');
+    assert.equal(inner[0].command, SCRIPT_PATH);
+    assert.equal(typeof inner[0].timeout, 'number');
+    assert.equal(inner[1].type, 'http');
+    assert.equal(inner[1].url, RUBRIC_URL);
+  }
+});
+
+test('apply without ensureDaemonScriptPath still writes only the http hook', () => {
+  // Backwards-compat: existing callers (tests) shouldn't be forced to pass it.
+  const out = applyRubricHooks({}, { daemonToken: TOK });
+  for (const evt of ['PreToolUse', 'PostToolUse', 'SessionStart']) {
+    const inner = out.hooks[evt][0].hooks;
+    assert.equal(inner.length, 1);
+    assert.equal(inner[0].type, 'http');
+  }
+});
+
+test('apply with script path is idempotent — no duplicate command hooks on re-apply', () => {
+  const once = applyRubricHooks({}, { daemonToken: TOK, ensureDaemonScriptPath: SCRIPT_PATH });
+  const twice = applyRubricHooks(once, { daemonToken: TOK, ensureDaemonScriptPath: SCRIPT_PATH });
+  assert.deepEqual(twice, once);
+  for (const evt of ['PreToolUse', 'PostToolUse', 'SessionStart']) {
+    const commandCount = twice.hooks[evt]
+      .flatMap((g) => g.hooks)
+      .filter((h) => h.type === 'command' && h.command === SCRIPT_PATH).length;
+    assert.equal(commandCount, 1, `${evt} should have exactly one ensure-daemon hook`);
+  }
+});
+
+test('remove strips the ensure-daemon command hook by exact path', () => {
+  const applied = applyRubricHooks({}, { daemonToken: TOK, ensureDaemonScriptPath: SCRIPT_PATH });
+  const removed = removeRubricHooks(applied, { ensureDaemonScriptPath: SCRIPT_PATH });
+  assert.deepEqual(removed, {});
+});
+
+test('remove strips the ensure-daemon command hook by filename heuristic when path is unknown', () => {
+  // User reinstalls after moving XDG_CONFIG_HOME, then uninstalls — the
+  // path in settings.json no longer matches the resolved path. The
+  // filename heuristic still catches it.
+  const input = {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: '*',
+          hooks: [
+            { type: 'command', command: '/old/path/rubric/ensure-daemon.sh', timeout: 3 },
+            { type: 'http', url: RUBRIC_URL, headers: {}, timeout: 5 },
+          ],
+        },
+      ],
+    },
+  };
+  const removed = removeRubricHooks(input); // no path passed
+  assert.equal(removed.hooks, undefined, 'both rubric entries should be stripped');
+});
+
+test('remove leaves a user-authored command hook with a different basename untouched', () => {
+  const input = {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            { type: 'command', command: '/usr/local/bin/my-pre-hook', timeout: 5 },
+          ],
+        },
+      ],
+    },
+  };
+  const removed = removeRubricHooks(input, { ensureDaemonScriptPath: SCRIPT_PATH });
+  assert.deepEqual(removed, input);
+});

@@ -2,6 +2,16 @@
 
 All notable changes to `@rubric-app/core` and `@rubric-app/claude-code` are recorded here.
 
+## 0.1.3 — 2026-05-19
+
+### Added
+
+- **`@rubric-app/claude-code`**: Each Rubric hook in `~/.claude/settings.json` is now preceded by an auto-revive preflight. `rubric init` writes a small shell script to `~/.config/rubric/ensure-daemon.sh` that curls `/healthz` and, if the daemon isn't responding, brings it back up via the platform service manager — `launchctl bootstrap` (for unloaded services) or `kickstart -k` (for hung but loaded services) on macOS, `systemctl --user restart` on Linux. The script polls up to ~5s for the daemon to bind and is throttled to one slow-path attempt per 30s so a broken install doesn't burn the full budget on every tool call. Fast path (daemon already up) adds ~20ms. The script always exits 0, so a failed revive falls through to the http hook and surfaces the real error to Claude Code instead of masking it. `rubric uninstall` strips the command hook by exact path with a basename fallback for older or relocated installs.
+
+### Changed
+
+- **launchd plist**: `ThrottleInterval` now set to `2` (down from launchd's 10s default). The previous default meant a killed daemon waited a full 10s before launchd would respawn it; with `2`, a kill-then-restart respawns within ~2s — fast enough for the new auto-revive script to confirm health inside its poll budget. Mirrors the `RestartSec=2` already used on the systemd-user unit. New plist applies on the next `rubric init` (or `--force`); existing installs are unaffected until they re-run init.
+
 ## 0.1.2 — 2026-05-19
 
 ### Changed

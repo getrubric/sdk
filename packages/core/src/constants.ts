@@ -57,6 +57,67 @@ export const ENV_AGENT_NAME = 'AG_AGENT_NAME';
 export const ENV_API_URL = 'AG_API_URL';
 export const DEFAULT_API_URL = 'https://api.rubric-app.com';
 
+// ---- API URL validation ----------------------------------------------------
+
+/**
+ * The Rubric API is hosted on the `rubric-app.com` domain. The SDK
+ * refuses to send bearer-bearing traffic anywhere else. This rules out
+ * localhost, IP literals, third-party hosts, and `http://` of any kind.
+ */
+export const ALLOWED_HOST_EXACT = 'rubric-app.com';
+export const ALLOWED_HOST_SUFFIX = '.rubric-app.com';
+
+// Internal: the SDK's own integration tests need to run against a local
+// mock HTTP server. This env var allows http://127.0.0.1 / http://localhost
+// as an API URL ONLY when set. It is intentionally undocumented and is
+// never set in production builds — package.json test scripts set it at
+// invocation time. Never set this yourself.
+const TEST_LOOPBACK_ESCAPE_ENV = 'RUBRIC_INTERNAL_ALLOW_LOOPBACK_FOR_TESTS';
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
+/**
+ * Validate an API URL. Returns `null` on accept, or a human-readable
+ * error string. The SDK accepts only `https://` URLs whose host is
+ * `rubric-app.com` or a subdomain of it (e.g. `api.rubric-app.com`,
+ * `staging.rubric-app.com`). The platform is hosted; there is no
+ * localhost or self-hosted path.
+ */
+export function validateApiUrl(input: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    return `not a valid URL: ${input}`;
+  }
+  const host = url.hostname.toLowerCase();
+  if (
+    process.env[TEST_LOOPBACK_ESCAPE_ENV] === '1' &&
+    LOOPBACK_HOSTS.has(host) &&
+    (url.protocol === 'http:' || url.protocol === 'https:')
+  ) {
+    return null;
+  }
+  if (url.protocol !== 'https:') {
+    return `must use https:// (got ${url.protocol})`;
+  }
+  if (host !== ALLOWED_HOST_EXACT && !host.endsWith(ALLOWED_HOST_SUFFIX)) {
+    return (
+      `host '${host}' is not a Rubric host; ` +
+      `the API URL must be on ${ALLOWED_HOST_EXACT} ` +
+      `(e.g. https://api.${ALLOWED_HOST_EXACT})`
+    );
+  }
+  return null;
+}
+
+/** Throw a `TypeError` if the URL fails `validateApiUrl`. */
+export function assertValidApiUrl(input: string): void {
+  const err = validateApiUrl(input);
+  if (err !== null) {
+    throw new TypeError(`invalid Rubric API URL: ${err}`);
+  }
+}
+
 // ---- Identity timing -------------------------------------------------------
 
 // Server-side TTL is 60 min; refresh fires this far before `expiresAt`.

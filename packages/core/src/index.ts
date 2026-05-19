@@ -69,6 +69,8 @@ export {
 } from './types.js';
 
 export {
+  ALLOWED_HOST_EXACT,
+  ALLOWED_HOST_SUFFIX,
   DECISION_ALLOW,
   DECISION_DENY,
   DECISION_VALUES,
@@ -76,6 +78,8 @@ export {
   DENY_REASON_AGENT_FROZEN,
   POLICY_CONDITION_OPERATOR_VALUES,
   RESULT_CODE_AGENT_FROZEN,
+  assertValidApiUrl,
+  validateApiUrl,
   type Decision,
   type PolicyConditionOperator,
 } from './constants.js';

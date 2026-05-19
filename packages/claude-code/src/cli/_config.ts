@@ -10,47 +10,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { errCode } from '@rubric-app/core';
+import { errCode, validateApiUrl } from '@rubric-app/core';
 import { z } from 'zod';
 
 import { readFileSecure, writeFileSecure } from '../config/fs-secure.js';
 
-/** Escape hatch env var that disables the HTTPS-for-non-loopback rule. */
-const RUBRIC_INSECURE_HTTP_ENV = 'RUBRIC_INSECURE_HTTP';
-
-/** Hostnames where http:// is acceptable (loopback). IPv6 literal
- *  appears both as `::1` (raw) and `[::1]` (URL-bracketed form). */
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-
-/**
- * Enforce HTTPS for any non-loopback API host so a JWT bearer never
- * traverses an unencrypted link. Returns `null` on accept, or a
- * human-readable error string. Loopback hosts may use either scheme.
- *
- * `RUBRIC_INSECURE_HTTP=1` overrides — kept for local testing against
- * a self-hosted dev API without TLS.
- */
-export function validateApiUrl(input: string): string | null {
-  let url: URL;
-  try {
-    url = new URL(input);
-  } catch {
-    return `not a valid URL: ${input}`;
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return `must use http:// or https:// (got ${url.protocol})`;
-  }
-  const host = url.hostname.toLowerCase();
-  const isLoopback = LOOPBACK_HOSTS.has(host);
-  if (url.protocol === 'http:' && !isLoopback) {
-    if (process.env[RUBRIC_INSECURE_HTTP_ENV] === '1') return null;
-    return (
-      `https:// required for non-loopback hosts. ` +
-      `Set ${RUBRIC_INSECURE_HTTP_ENV}=1 to override (testing only).`
-    );
-  }
-  return null;
-}
+// Re-export so existing imports from `../cli/_config` keep working.
+export { validateApiUrl };
 
 export const PersistedConfigSchema = z.object({
   apiUrl: z

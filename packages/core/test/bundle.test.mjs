@@ -91,7 +91,7 @@ async function runOnePull(responses, opts = {}) {
   };
   const events = { updates: [], errors: [] };
   const poller = new BundlePoller({
-    apiUrl: 'http://localhost:9999',
+    apiUrl: 'https://api.rubric-app.com',
     tokenStore: stubTokenStore(),
     onUpdate: (b) => {
       events.updates.push(b);
@@ -126,7 +126,7 @@ test('lastBundleChangeAt is set on first successful bundle pull', async () => {
 test('BundlePoller exposes lastPullAt and lastBundleChangeAt as getters', () => {
   // Surface check — the daemon's /v1/status endpoint reads both names.
   const poller = new BundlePoller({
-    apiUrl: 'http://localhost:9999',
+    apiUrl: 'https://api.rubric-app.com',
     tokenStore: stubTokenStore(),
     onUpdate: () => {},
     fetch: async () => jsonResponse(null, { status: 304 }),
@@ -158,7 +158,7 @@ test('poller rejects an incoming bundle with a lower bundleVersion', async () =>
     i < responses.length ? responses[i++] : jsonResponse(null, { status: 304 });
   const events = { updates: [], errors: [] };
   const poller = new BundlePoller({
-    apiUrl: 'http://localhost:9999',
+    apiUrl: 'https://api.rubric-app.com',
     tokenStore: stubTokenStore(),
     onUpdate: (b) => events.updates.push(b),
     onError: (e) => events.errors.push(e),
@@ -204,7 +204,7 @@ test('poller rejects an incoming bundle with a much older builtAt', async () => 
     i < responses.length ? responses[i++] : jsonResponse(null, { status: 304 });
   const events = { updates: [], errors: [] };
   const poller = new BundlePoller({
-    apiUrl: 'http://localhost:9999',
+    apiUrl: 'https://api.rubric-app.com',
     tokenStore: stubTokenStore(),
     onUpdate: (b) => events.updates.push(b),
     onError: (e) => events.errors.push(e),
@@ -233,7 +233,7 @@ test('poller accepts a newer bundleVersion even with the same contentHash treatm
     i < responses.length ? responses[i++] : jsonResponse(null, { status: 304 });
   const events = { updates: [], errors: [] };
   const poller = new BundlePoller({
-    apiUrl: 'http://localhost:9999',
+    apiUrl: 'https://api.rubric-app.com',
     tokenStore: stubTokenStore(),
     onUpdate: (b) => events.updates.push(b),
     onError: (e) => events.errors.push(e),

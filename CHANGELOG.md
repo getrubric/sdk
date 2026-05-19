@@ -2,6 +2,12 @@
 
 All notable changes to `@rubric-app/core` and `@rubric-app/claude-code` are recorded here.
 
+## 0.1.2 — 2026-05-19
+
+### Changed
+
+- The SDK now accepts only `https://` API URLs whose host is `rubric-app.com` or a subdomain of it (`api.`, `staging.`, etc.). Loopback hosts (`localhost`, `127.0.0.1`, `::1`) and the previous `RUBRIC_INSECURE_HTTP=1` escape hatch are no longer accepted. `validateApiUrl` is now exported from `@rubric-app/core` and called from every primitive (`TokenStore`, `BundlePoller`, `AuditSink`) at construction — failure raises `TypeError` immediately. Existing installs pointing at the production URL are unaffected.
+
 ## 0.1.1 — 2026-05-18
 
 ### Fixed

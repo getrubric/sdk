@@ -26,6 +26,7 @@ import {
   HTTP_HEADER_AUTHORIZATION,
   HTTP_HEADER_CONTENT_TYPE,
   HTTP_UNAUTHORIZED,
+  assertValidApiUrl,
 } from './constants.js';
 import { GovernanceError, IdentityRevokedError, parseProblemDetails } from './errors.js';
 import { TokenStore } from './identity.js';
@@ -106,6 +107,7 @@ export class AuditSink {
   private _droppedQueueFull = 0;
 
   constructor(options: AuditSinkOptions) {
+    assertValidApiUrl(options.apiUrl);
     this._apiUrl = options.apiUrl.replace(/\/+$/, '');
     this._tokenStore = options.tokenStore;
     this._onError = options.onError ?? (() => {});

@@ -1,6 +1,6 @@
 {
   "name": "@rubric-app/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Framework-neutral runtime building blocks for Rubric SDK adapters — agent identity, policy bundle polling, audit sink, and tool-call evaluator.",
   "license": "MIT",
   "homepage": "https://rubric-app.com",
@@ -40,7 +40,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node --test test/*.test.mjs",
+    "test": "pnpm build && RUBRIC_INTERNAL_ALLOW_LOOPBACK_FOR_TESTS=1 node --test test/*.test.mjs",
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {

@@ -23,12 +23,12 @@ function tmpFile() {
 test('writeConfig + readConfig round-trip', () => {
   const file = tmpFile();
   writeConfig(file, {
-    apiUrl: 'http://localhost:3001',
+    apiUrl: 'https://api.rubric-app.com',
     agentName: 'claude-code-mac',
     enrollmentToken: 'enr_abc.def',
   });
   const back = readConfig(file);
-  assert.equal(back.apiUrl, 'http://localhost:3001');
+  assert.equal(back.apiUrl, 'https://api.rubric-app.com');
   assert.equal(back.agentName, 'claude-code-mac');
   assert.equal(back.enrollmentToken, 'enr_abc.def');
 });
@@ -36,7 +36,7 @@ test('writeConfig + readConfig round-trip', () => {
 test('writeConfig sets 0600 permissions on the config file', () => {
   const file = tmpFile();
   writeConfig(file, {
-    apiUrl: 'http://localhost:3001',
+    apiUrl: 'https://api.rubric-app.com',
     agentName: 'a',
     enrollmentToken: 'enr_x',
   });
@@ -61,8 +61,7 @@ test('readConfig throws clearly on a schema-invalid file', () => {
 test('configExists is true after write, false otherwise', () => {
   const file = tmpFile();
   assert.equal(configExists(file), false);
-  // Loopback URL — the validator allows http:// only for loopback hosts.
-  writeConfig(file, { apiUrl: 'http://localhost', agentName: 'a', enrollmentToken: 'enr_x' });
+  writeConfig(file, { apiUrl: 'https://api.rubric-app.com', agentName: 'a', enrollmentToken: 'enr_x' });
   assert.equal(configExists(file), true);
 });
 

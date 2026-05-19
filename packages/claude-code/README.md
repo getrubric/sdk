@@ -121,10 +121,9 @@ The daemon does not phone home anywhere else. The only network egress is to your
 
 | Env var | Effect |
 | --- | --- |
-| `RUBRIC_API_URL` | Override the Rubric control plane URL (default `https://api.rubric-app.com`). HTTPS is required for non-loopback hosts. |
+| `RUBRIC_API_URL` | Override the Rubric API URL (default `https://api.rubric-app.com`). Must be `https://` and on `rubric-app.com` or a subdomain — the SDK refuses everything else. |
 | `RUBRIC_AGENT_NAME` | Skip the agent-name prompt during `rubric init`. |
 | `RUBRIC_ENROLLMENT_TOKEN` | Skip the enrollment-token prompt during `rubric init`. |
-| `RUBRIC_INSECURE_HTTP=1` | (Testing only) Allow plaintext `http://` for non-loopback API URLs. Do not set this in production. |
 
 ## License
 

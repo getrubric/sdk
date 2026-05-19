@@ -28,7 +28,7 @@ function mkEvent(overrides = {}) {
 // Minimal in-memory TokenStore stub. We construct a real TokenStore and
 // fake out `token()` to avoid the enrollment flow.
 function mkFakeTokenStore() {
-  const store = new TokenStore({ apiUrl: 'http://test.invalid' });
+  const store = new TokenStore({ apiUrl: 'https://api.rubric-app.com' });
   // Cheat past the IdentityNotInitialized guard. Internal-field
   // access is fine inside the package's own test suite.
   store._token = 'fake-jwt';
@@ -41,7 +41,7 @@ function mkFakeTokenStore() {
 // ---- eventId stamping -----------------------------------------------------
 
 test('enqueue stamps a UUID-shaped eventId into metadata', () => {
-  const sink = new AuditSink({ apiUrl: 'http://test.invalid', tokenStore: mkFakeTokenStore() });
+  const sink = new AuditSink({ apiUrl: 'https://api.rubric-app.com', tokenStore: mkFakeTokenStore() });
   sink.enqueue(mkEvent());
   // Pop via internal queue to verify the stamped shape.
   const queued = sink._queue[0];
@@ -50,7 +50,7 @@ test('enqueue stamps a UUID-shaped eventId into metadata', () => {
 });
 
 test('existing metadata is preserved alongside the eventId', () => {
-  const sink = new AuditSink({ apiUrl: 'http://test.invalid', tokenStore: mkFakeTokenStore() });
+  const sink = new AuditSink({ apiUrl: 'https://api.rubric-app.com', tokenStore: mkFakeTokenStore() });
   sink.enqueue(mkEvent({ metadata: { tool_input: { cmd: 'ls' }, custom: 42 } }));
   const queued = sink._queue[0];
   assert.deepEqual(queued.metadata.tool_input, { cmd: 'ls' });
@@ -59,7 +59,7 @@ test('existing metadata is preserved alongside the eventId', () => {
 });
 
 test('every enqueue gets a fresh eventId', () => {
-  const sink = new AuditSink({ apiUrl: 'http://test.invalid', tokenStore: mkFakeTokenStore() });
+  const sink = new AuditSink({ apiUrl: 'https://api.rubric-app.com', tokenStore: mkFakeTokenStore() });
   sink.enqueue(mkEvent());
   sink.enqueue(mkEvent());
   sink.enqueue(mkEvent());
@@ -70,7 +70,7 @@ test('every enqueue gets a fresh eventId', () => {
 // ---- counters -------------------------------------------------------------
 
 test('getStats initially zero with empty queue', () => {
-  const sink = new AuditSink({ apiUrl: 'http://test.invalid', tokenStore: mkFakeTokenStore() });
+  const sink = new AuditSink({ apiUrl: 'https://api.rubric-app.com', tokenStore: mkFakeTokenStore() });
   const s = sink.getStats();
   assert.equal(s.enqueued, 0);
   assert.equal(s.sent, 0);
@@ -81,7 +81,7 @@ test('getStats initially zero with empty queue', () => {
 });
 
 test('enqueued increments per call; queueDepth tracks live queue', () => {
-  const sink = new AuditSink({ apiUrl: 'http://test.invalid', tokenStore: mkFakeTokenStore() });
+  const sink = new AuditSink({ apiUrl: 'https://api.rubric-app.com', tokenStore: mkFakeTokenStore() });
   sink.enqueue(mkEvent());
   sink.enqueue(mkEvent());
   const s = sink.getStats();
@@ -91,7 +91,7 @@ test('enqueued increments per call; queueDepth tracks live queue', () => {
 
 test('droppedQueueFull increments when queue at maxQueue', () => {
   const sink = new AuditSink({
-    apiUrl: 'http://test.invalid',
+    apiUrl: 'https://api.rubric-app.com',
     tokenStore: mkFakeTokenStore(),
     maxQueue: 2,
   });
@@ -113,7 +113,7 @@ test('4xx flush increments dropped4xx by batch size', async () => {
     });
   const errors = [];
   const sink = new AuditSink({
-    apiUrl: 'http://test.invalid',
+    apiUrl: 'https://api.rubric-app.com',
     tokenStore: mkFakeTokenStore(),
     fetch: fakeFetch,
     onError: (e) => errors.push(e),
@@ -132,7 +132,7 @@ test('4xx flush increments dropped4xx by batch size', async () => {
 test('sent counter increments by batch size on 202', async () => {
   const fakeFetch = async () => new Response('', { status: 202 });
   const sink = new AuditSink({
-    apiUrl: 'http://test.invalid',
+    apiUrl: 'https://api.rubric-app.com',
     tokenStore: mkFakeTokenStore(),
     fetch: fakeFetch,
   });
@@ -161,7 +161,7 @@ test('4xx problem detail with a Bearer token in it is scrubbed before onError', 
     );
   const errors = [];
   const sink = new AuditSink({
-    apiUrl: 'http://test.invalid',
+    apiUrl: 'https://api.rubric-app.com',
     tokenStore: mkFakeTokenStore(),
     fetch: fakeFetch,
     onError: (e) => errors.push(e),

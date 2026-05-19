@@ -31,7 +31,7 @@ test('refresh loop does not hot-spin on unparseable expiresAt and emits a warn',
     );
   };
   const store = new TokenStore({
-    apiUrl: 'http://test.invalid',
+    apiUrl: 'https://api.rubric-app.com',
     fetch: fakeFetch,
     onWarn: (m) => warns.push(m),
   });
@@ -73,7 +73,7 @@ test('malformed token response with secret-shaped key is wrapped + scrubbed', as
       }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     );
-  const store = new TokenStore({ apiUrl: 'http://test.invalid', fetch: fakeFetch });
+  const store = new TokenStore({ apiUrl: 'https://api.rubric-app.com', fetch: fakeFetch });
 
   await assert.rejects(
     () => store.initialEnrollment('enr_test', 'agent-test'),
@@ -92,7 +92,7 @@ test('5xx response body with embedded JWT is scrubbed in the thrown message', as
   const leakingJwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4eHgifQ.abcdefghijklmnopqrstuvwxyz';
   const fakeFetch = async () =>
     new Response(`internal error; offending request body: ${leakingJwt}`, { status: 500 });
-  const store = new TokenStore({ apiUrl: 'http://test.invalid', fetch: fakeFetch });
+  const store = new TokenStore({ apiUrl: 'https://api.rubric-app.com', fetch: fakeFetch });
 
   await assert.rejects(
     () => store.initialEnrollment('enr_test', 'agent-test'),
@@ -120,7 +120,7 @@ test('401 refresh failure with embedded token in problem detail is scrubbed', as
       }),
       { status: 401, headers: { 'content-type': 'application/problem+json' } },
     );
-  const store = new TokenStore({ apiUrl: 'http://test.invalid', fetch: fakeFetch });
+  const store = new TokenStore({ apiUrl: 'https://api.rubric-app.com', fetch: fakeFetch });
   store._token = 'old-jwt';
 
   await assert.rejects(

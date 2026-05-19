@@ -27,6 +27,7 @@ import {
   HTTP_HEADER_CONTENT_TYPE,
   HTTP_UNAUTHORIZED,
   IDENTITY_REFRESH_LEAD_SECONDS,
+  assertValidApiUrl,
 } from './constants.js';
 import { errMessage, safeText, scrubSecrets, sleepOrAbort } from './_internal.js';
 import { ZodError } from 'zod';
@@ -93,6 +94,7 @@ export class TokenStore {
   private _refreshInFlight: Promise<void> | null = null;
 
   constructor(options: TokenStoreOptions) {
+    assertValidApiUrl(options.apiUrl);
     this._apiUrl = options.apiUrl.replace(/\/+$/, '');
     this._fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
     this._requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS;

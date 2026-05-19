@@ -19,6 +19,7 @@ import {
   HTTP_NO_CONTENT,
   HTTP_NOT_MODIFIED,
   HTTP_UNAUTHORIZED,
+  assertValidApiUrl,
 } from './constants.js';
 import { GovernanceError, IdentityRevokedError, parseProblemDetails } from './errors.js';
 import { TokenStore } from './identity.js';
@@ -94,6 +95,7 @@ export class BundlePoller {
   private readonly _firstPull: Promise<void>;
 
   constructor(options: BundlePollerOptions) {
+    assertValidApiUrl(options.apiUrl);
     this._apiUrl = options.apiUrl.replace(/\/+$/, '');
     this._tokenStore = options.tokenStore;
     this._onUpdate = options.onUpdate;

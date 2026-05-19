@@ -1,6 +1,6 @@
 {
   "name": "@rubric-app/claude-code",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Rubric Claude Code adapter — long-lived loopback daemon + `rubric` CLI that routes every Claude Code tool call through the Rubric policy engine and audit log.",
   "license": "MIT",
   "homepage": "https://rubric-app.com",
@@ -45,7 +45,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x dist/cli/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node --test test/*.test.mjs",
+    "test": "pnpm build && RUBRIC_INTERNAL_ALLOW_LOOPBACK_FOR_TESTS=1 node --test test/*.test.mjs",
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {

@@ -12,12 +12,14 @@ import type { Paths } from '../paths.js';
 import {
   buildLaunchdService,
   installLaunchdService,
+  kickstartLaunchdService,
   uninstallLaunchdService,
   LAUNCHD_LABEL,
 } from './launchd.js';
 import {
   buildSystemdService,
   installSystemdService,
+  kickstartSystemdService,
   uninstallSystemdService,
   SYSTEMD_UNIT_NAME,
 } from './systemd.js';
@@ -134,6 +136,33 @@ export async function uninstallService(
   return {
     platform: 'unsupported',
     loaded: false,
+    message: `no service manager known for platform '${platform}'`,
+  };
+}
+
+/**
+ * Force the platform service manager to restart the daemon. Used after
+ * `rubric init --force` rotates the daemon token: the existing daemon
+ * has the old token cached in memory and would 401 every hook until it
+ * naturally restarts otherwise. Best-effort — failures don't break the
+ * install (the daemon will pick up the new token on next natural
+ * restart), but the caller should surface a warning if `kicked` is false.
+ */
+export async function kickstartService(
+  options: { platform?: NodeJS.Platform } = {},
+): Promise<{ platform: ServicePlatform; kicked: boolean; message: string }> {
+  const platform = options.platform ?? process.platform;
+  if (platform === 'darwin') {
+    const result = await kickstartLaunchdService();
+    return { platform: 'launchd', kicked: result.kicked, message: result.message };
+  }
+  if (platform === 'linux') {
+    const result = await kickstartSystemdService();
+    return { platform: 'systemd', kicked: result.kicked, message: result.message };
+  }
+  return {
+    platform: 'unsupported',
+    kicked: false,
     message: `no service manager known for platform '${platform}'`,
   };
 }

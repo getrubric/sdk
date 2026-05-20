@@ -5,9 +5,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildLaunchdService, LAUNCHD_LABEL } from '../dist/config/services/launchd.js';
-import { buildSystemdService, SYSTEMD_UNIT_NAME } from '../dist/config/services/systemd.js';
-import { installService, uninstallService } from '../dist/config/services/index.js';
+import {
+  buildLaunchdService,
+  kickstartLaunchdService,
+  LAUNCHD_LABEL,
+} from '../dist/config/services/launchd.js';
+import {
+  buildSystemdService,
+  kickstartSystemdService,
+  SYSTEMD_UNIT_NAME,
+} from '../dist/config/services/systemd.js';
+import {
+  installService,
+  kickstartService,
+  uninstallService,
+} from '../dist/config/services/index.js';
 
 const FAKE_PATHS = {
   configDir: '/Users/x/.config/rubric',
@@ -143,5 +155,55 @@ test('uninstallService on unsupported platform returns a graceful result', async
     home: '/Users/x',
   });
   assert.equal(result.platform, 'unsupported');
+  assert.match(result.message, /no service manager/);
+});
+
+// ---- kickstart -------------------------------------------------------------
+
+function fakeExec(code, stderr = '') {
+  return async (cmd, args) => ({ code, stdout: '', stderr, _cmd: cmd, _args: args });
+}
+
+test('kickstartLaunchdService: exit 0 → kicked=true with the resolved label', async () => {
+  let observed;
+  const result = await kickstartLaunchdService(LAUNCHD_LABEL, async (cmd, args) => {
+    observed = { cmd, args };
+    return { code: 0, stdout: '', stderr: '' };
+  });
+  assert.equal(result.kicked, true);
+  assert.equal(observed.cmd, 'launchctl');
+  assert.deepEqual(observed.args.slice(0, 2), ['kickstart', '-k']);
+  assert.match(observed.args[2], new RegExp(`gui/\\d+/${LAUNCHD_LABEL}`));
+});
+
+test('kickstartLaunchdService: non-zero exit → kicked=false with stderr surfaced', async () => {
+  const result = await kickstartLaunchdService(LAUNCHD_LABEL, fakeExec(3, 'service not loaded'));
+  assert.equal(result.kicked, false);
+  assert.match(result.message, /returned 3/);
+  assert.match(result.message, /service not loaded/);
+});
+
+test('kickstartSystemdService: exit 0 → kicked=true with the resolved unit name', async () => {
+  let observed;
+  const result = await kickstartSystemdService(SYSTEMD_UNIT_NAME, async (cmd, args) => {
+    observed = { cmd, args };
+    return { code: 0, stdout: '', stderr: '' };
+  });
+  assert.equal(result.kicked, true);
+  assert.equal(observed.cmd, 'systemctl');
+  assert.deepEqual(observed.args, ['--user', 'restart', SYSTEMD_UNIT_NAME]);
+});
+
+test('kickstartSystemdService: non-zero exit → kicked=false with stderr surfaced', async () => {
+  const result = await kickstartSystemdService(SYSTEMD_UNIT_NAME, fakeExec(1, 'Unit not found'));
+  assert.equal(result.kicked, false);
+  assert.match(result.message, /returned 1/);
+  assert.match(result.message, /Unit not found/);
+});
+
+test('kickstartService on unsupported platform returns a graceful result', async () => {
+  const result = await kickstartService({ platform: 'win32' });
+  assert.equal(result.platform, 'unsupported');
+  assert.equal(result.kicked, false);
   assert.match(result.message, /no service manager/);
 });

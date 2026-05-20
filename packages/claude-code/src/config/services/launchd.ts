@@ -131,6 +131,31 @@ export async function installLaunchdService(
   };
 }
 
+/**
+ * Force-restart the already-loaded launchd service. Used by `rubric init
+ * --force` after rotating the daemon token: bootstrap is a no-op on an
+ * already-loaded service, so the running process keeps the old token in
+ * memory until something restarts it.
+ *
+ * Best-effort: if the service isn't loaded at all (e.g. a fresh install
+ * happened in the same init run and bootstrap already started it), this
+ * is a redundant kick. We swallow the resulting non-zero exit.
+ */
+export async function kickstartLaunchdService(
+  label: string = LAUNCHD_LABEL,
+  exec: ExecCommand = defaultExec,
+): Promise<{ kicked: boolean; message: string }> {
+  const uid = process.getuid?.() ?? 0;
+  const result = await exec('launchctl', ['kickstart', '-k', `gui/${uid}/${label}`]);
+  if (result.code === 0) {
+    return { kicked: true, message: `kicked via launchctl kickstart -k gui/${uid}/${label}` };
+  }
+  return {
+    kicked: false,
+    message: `launchctl kickstart returned ${result.code}: ${result.stderr.trim()}`,
+  };
+}
+
 export async function uninstallLaunchdService(
   plistPath: string,
   label: string = LAUNCHD_LABEL,

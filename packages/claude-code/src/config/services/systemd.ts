@@ -106,6 +106,26 @@ export async function installSystemdService(
   return { spec, loaded: true, message: 'enabled via systemctl --user enable --now' };
 }
 
+/**
+ * Restart the already-loaded systemd-user unit. Used by `rubric init
+ * --force` after rotating the daemon token: enable --now is a no-op on
+ * an already-enabled unit, so the running process keeps the old token in
+ * memory until something restarts it.
+ */
+export async function kickstartSystemdService(
+  unitName: string = SYSTEMD_UNIT_NAME,
+  exec: ExecCommand = defaultExec,
+): Promise<{ kicked: boolean; message: string }> {
+  const result = await exec('systemctl', ['--user', 'restart', unitName]);
+  if (result.code === 0) {
+    return { kicked: true, message: `restarted via systemctl --user restart ${unitName}` };
+  }
+  return {
+    kicked: false,
+    message: `systemctl --user restart returned ${result.code}: ${result.stderr.trim()}`,
+  };
+}
+
 export async function uninstallSystemdService(
   unitPath: string,
   unitName: string = SYSTEMD_UNIT_NAME,

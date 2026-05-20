@@ -2,6 +2,13 @@
 
 All notable changes to `@rubric-app/core` and `@rubric-app/claude-code` are recorded here.
 
+## 0.1.4 — 2026-05-20
+
+### Fixed
+
+- **`rubric init --force`**: now reuses the `enrollmentToken` already persisted in `~/.config/rubric/config.json` instead of re-prompting for it. Matches the behavior already in place for `agentName` and `apiUrl`. Tokens passed via `--enrollment-token` / `RUBRIC_ENROLLMENT_TOKEN` still take precedence.
+- **`rubric init --force`** now restarts the daemon at the end of install so the running process picks up the rotated bearer token immediately. Previously `launchctl bootstrap` / `systemctl enable --now` were no-ops against an already-loaded unit, leaving the old token cached in memory and producing a `[fail] bundle non-empty + fresh status returned 401` from `rubric doctor` until the service was kicked by hand.
+
 ## 0.1.3 — 2026-05-19
 
 ### Added

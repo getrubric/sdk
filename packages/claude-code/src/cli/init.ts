@@ -23,7 +23,7 @@ import prompts from 'prompts';
 
 import { ensureDirMode, writeFileSecure } from '../config/fs-secure.js';
 import { defaultPaths, type Paths } from '../config/paths.js';
-import { installService } from '../config/services/index.js';
+import { installService, kickstartService } from '../config/services/index.js';
 import { applyRubricHooks } from '../config/settings-json.js';
 import { writeEnsureDaemonScript } from '../config/ensure-daemon-script.js';
 import { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT } from '../daemon/server.js';
@@ -153,6 +153,31 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
       process.stdout.write(
         `${ok(`installed ${result.platform} service`)}  ${dim(result.message)}\n`,
       );
+      // Force-restart so the daemon picks up the newly-rotated bearer
+      // token and the newly-written ensure-daemon script path.
+      // bootstrap/enable are no-ops on an already-loaded unit, so
+      // without this kick a re-init leaves the running process holding
+      // the previous token in memory and every hook 401's.
+      const kick = await kickstartService();
+      if (kick.kicked) {
+        process.stdout.write(`${ok(`restarted daemon`)}  ${dim(kick.message)}\n`);
+        // Poll /healthz so init doesn't return until the daemon is
+        // actually serving — without this, doctor run immediately
+        // after init shows red checks because the daemon is still
+        // mid-startup (Node init + first bundle pull takes a beat).
+        const ready = await waitForDaemonHealth(DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT);
+        if (!ready) {
+          process.stdout.write(
+            `${warn('daemon did not come up within 10s — run `rubric doctor` to inspect')}\n`,
+          );
+        }
+      } else {
+        process.stdout.write(
+          `${warn(
+            `daemon may need a manual restart to pick up the new token: ${kick.message}`,
+          )}\n`,
+        );
+      }
       if (result.platform === 'systemd') {
         process.stdout.write(
           `${dim('  tip: run `loginctl enable-linger $USER` if you want the daemon to keep running after logout')}\n`,
@@ -209,7 +234,10 @@ async function collectConfig(options: InitOptions, paths: Paths): Promise<Persis
   const agentName =
     options.agentName ?? process.env['RUBRIC_AGENT_NAME'] ?? existing.agentName ?? undefined;
   const enrollmentToken =
-    options.enrollmentToken ?? process.env['RUBRIC_ENROLLMENT_TOKEN'] ?? undefined;
+    options.enrollmentToken ??
+    process.env['RUBRIC_ENROLLMENT_TOKEN'] ??
+    existing.enrollmentToken ??
+    undefined;
 
   const questions: prompts.PromptObject[] = [];
   if (!agentName) {
@@ -309,6 +337,32 @@ function resolveCliEntry(): string {
   }
   const here = fileURLToPath(import.meta.url);
   return path.join(path.dirname(here), 'index.js');
+}
+
+/**
+ * Poll the daemon's `/healthz` until it returns 200 or the budget runs
+ * out. Used by `init` so it doesn't return until the daemon it just
+ * restarted is actually serving — saves the user from a transient
+ * red-check on the immediately-following `rubric doctor`.
+ */
+async function waitForDaemonHealth(
+  host: string,
+  port: number,
+  budgetMs: number = 10_000,
+  tickMs: number = 200,
+): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  const url = `http://${host}:${port}/healthz`;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(tickMs) });
+      if (res.status === 200) return true;
+    } catch {
+      // connection refused / timeout — daemon still coming up.
+    }
+    await new Promise((resolve) => setTimeout(resolve, tickMs));
+  }
+  return false;
 }
 
 function shortHostname(): string {

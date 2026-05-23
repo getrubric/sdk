@@ -21,7 +21,7 @@ import {
   HTTP_UNAUTHORIZED,
   assertValidApiUrl,
 } from './constants.js';
-import { GovernanceError, IdentityRevokedError, parseProblemDetails } from './errors.js';
+import { GovernanceError, parseProblemDetails } from './errors.js';
 import { TokenStore } from './identity.js';
 import { BundleSchema, type Bundle } from './types.js';
 
@@ -208,13 +208,13 @@ export class BundlePoller {
       try {
         await this._pullOnce(signal);
       } catch (err: unknown) {
-        if (err instanceof IdentityRevokedError) {
-          // Revoked identity is terminal: stop the poller and trigger
-          // the first-pull resolver so anyone awaiting it doesn't hang.
-          this._resolveFirstPull();
-          this._onError(err);
-          return;
-        }
+        // The loop must never terminate on a pull error. Returning here on
+        // a revoked/stale identity would silently stop polling: the daemon
+        // would keep enforcing the last cached bundle and never pick up
+        // kill-switch flips or new policy. Surface the error and keep
+        // polling on the normal cadence; the TokenStore self-heals via
+        // re-enrollment, so the next pull resumes once the identity is
+        // valid again.
         this._onError(err);
       } finally {
         this._resolveFirstPull();
@@ -292,9 +292,10 @@ export class BundlePoller {
 
   /**
    * `fetch` wrapper that retries once on 401 after asking the TokenStore
-   * to refresh. A second 401 (or any other failure from forceRefresh)
-   * surfaces as `IdentityRevokedError`, which the run-loop treats as
-   * terminal.
+   * to refresh. `forceRefresh` now falls back to re-enrollment, so a
+   * stale JWT recovers transparently; only a genuinely unrecoverable
+   * identity surfaces `IdentityRevokedError`. Either way the run-loop
+   * logs it and keeps polling — it is no longer terminal.
    */
   private async _fetchWithAuthRetry(path: string, signal: AbortSignal): Promise<Response> {
     const res = await this._fetchOnce(path, signal);

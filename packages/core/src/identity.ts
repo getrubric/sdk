@@ -85,6 +85,14 @@ export class TokenStore {
   private _identityId: string | null = null;
   private _dead = false;
 
+  // Retained on the first successful enrollment so the store can self-heal:
+  // if a refresh is rejected (e.g. the JWT went stale during an offline
+  // period, which is indistinguishable from a real revocation), we re-run
+  // enrollment with these instead of dying permanently. See `reenroll()`
+  // and the recovery branch in `_refreshLoop`.
+  private _enrollmentToken: string | null = null;
+  private _agentName: string | null = null;
+
   private _stopController: AbortController | null = null;
   private _loopPromise: Promise<void> | null = null;
 
@@ -161,6 +169,10 @@ export class TokenStore {
     }
     const body = await this._parseTokenResponse(res, 'identity enrollment');
     this._applyTokenResponse(body);
+    // Retain for self-heal. Set only after a successful enrollment so we
+    // never cache credentials that the server already rejected.
+    this._enrollmentToken = enrollmentToken;
+    this._agentName = agentName;
   }
 
   /**
@@ -194,13 +206,16 @@ export class TokenStore {
   /**
    * Called by HTTP clients when a request returns 401.
    *
-   * Throws `IdentityRevokedError` if the server says the identity is gone;
-   * the store transitions to a terminal dead state and every subsequent
-   * `token()` call will raise.
+   * Tries a refresh; if the server rejects that with a 401 (a stale JWT
+   * after an offline period looks identical to a real revocation), it
+   * falls back to a fresh enrollment with the retained enrollment token.
+   * Only if *that* also fails does the store enter the dead state — and
+   * even then it is recoverable: the refresh loop and `reenroll()` keep
+   * retrying, so death is no longer terminal.
    */
   async forceRefresh(): Promise<void> {
     if (this._refreshInFlight) return this._refreshInFlight;
-    const inflight = this._refreshOnce().catch((err: unknown) => {
+    const inflight = this._refreshOrReenroll().catch((err: unknown) => {
       if (err instanceof IdentityRevokedError) {
         this._dead = true;
       }
@@ -212,12 +227,47 @@ export class TokenStore {
     return this._refreshInFlight;
   }
 
+  /**
+   * Re-run enrollment with the retained enrollment token + agent name to
+   * recover from a rejected identity. On success the store leaves the dead
+   * state (via `_applyTokenResponse`). Throws `GovernanceError` if no
+   * reusable credentials were retained (the store was never enrolled).
+   *
+   * Enrollment is idempotent on `agentName` server-side, so concurrent
+   * callers — the refresh loop, a 401 on the bundle path, and the daemon's
+   * hook-triggered reviver — racing into this are safe: each gets a fresh
+   * JWT and last-write-wins on the token.
+   */
+  async reenroll(): Promise<void> {
+    if (this._enrollmentToken === null || this._agentName === null) {
+      throw new GovernanceError('cannot re-enroll: no retained enrollment credentials');
+    }
+    await this.initialEnrollment(this._enrollmentToken, this._agentName);
+  }
+
   // ---- Internals ------------------------------------------------------------
 
   private async _refreshLoop(signal: AbortSignal): Promise<void> {
     let backoffMs = REFRESH_BACKOFF_INITIAL_MS;
     while (!signal.aborted) {
-      if (this._dead) return;
+      // Recovery branch. Terminating this loop on a rejected identity
+      // (`_dead = true; return`) — combined with the bundle poller doing
+      // the same — would leave the daemon enforcing the last cached bundle
+      // indefinitely after a transient outage. Instead, keep trying to
+      // re-enroll on a capped backoff so the store self-heals once the
+      // network / server recovers.
+      if (this._dead) {
+        try {
+          await this.reenroll();
+          backoffMs = REFRESH_BACKOFF_INITIAL_MS;
+          continue;
+        } catch (err: unknown) {
+          this._onWarn(`identity self-heal: re-enrollment failed: ${errMessage(err)}`);
+          if (await sleepOrAbort(backoffMs, signal)) return;
+          backoffMs = Math.min(REFRESH_BACKOFF_MAX_MS, backoffMs * 2);
+          continue;
+        }
+      }
       const exp = this._expiresAtEpoch;
       if (exp === null) return;
 
@@ -250,16 +300,39 @@ export class TokenStore {
         backoffMs = REFRESH_BACKOFF_INITIAL_MS;
       } catch (err: unknown) {
         if (err instanceof IdentityRevokedError) {
+          // Mark dead and let the recovery branch at the top of the loop
+          // attempt re-enrollment on the next iteration. Do NOT return — a
+          // terminal return here would strand the daemon on the last
+          // cached bundle until the process restarts.
           this._dead = true;
-          // Deliberately no logger dep in core; the daemon wraps this
-          // store and surfaces a structured pino event when the loop
-          // returns.
-          return;
+          continue;
         }
         const stopped = await sleepOrAbort(backoffMs, signal);
         if (stopped) return;
         backoffMs = Math.min(REFRESH_BACKOFF_MAX_MS, backoffMs * 2);
       }
+    }
+  }
+
+  /**
+   * Refresh; if the server 401s the refresh — which a stale/expired JWT
+   * after an offline period produces, indistinguishable from a real
+   * revocation — fall back to a fresh enrollment before surfacing the
+   * error. Only re-enrolls when reusable credentials are present.
+   */
+  private async _refreshOrReenroll(): Promise<void> {
+    try {
+      await this._refreshOnce();
+    } catch (err: unknown) {
+      if (
+        err instanceof IdentityRevokedError &&
+        this._enrollmentToken !== null &&
+        this._agentName !== null
+      ) {
+        await this.initialEnrollment(this._enrollmentToken, this._agentName);
+        return;
+      }
+      throw err;
     }
   }
 
@@ -309,6 +382,10 @@ export class TokenStore {
   }
 
   private _applyTokenResponse(body: SdkTokenResponse): void {
+    // Any successful token application clears the dead state — this is how
+    // a re-enrollment (or a recovered refresh) revives a store that had
+    // been marked dead after a rejected identity.
+    this._dead = false;
     this._token = body.token;
     this._expiresAtEpoch = parseIsoToEpoch(body.expiresAt);
     // `agentId`/`identityId` are server-stable across refreshes — set on

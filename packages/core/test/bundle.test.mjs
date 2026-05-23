@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { BundlePoller } from '../dist/index.js';
+import { BundlePoller, IdentityRevokedError } from '../dist/index.js';
 
 const VALID_HASH_A = 'a'.repeat(64);
 const VALID_HASH_B = 'b'.repeat(64);
@@ -249,4 +249,63 @@ test('poller accepts a newer bundleVersion even with the same contentHash treatm
   assert.equal(events.updates[1].bundleVersion, 2);
   assert.equal(poller.current.bundleVersion, 2);
   assert.equal(poller.lastRejectedBundleAt, null);
+});
+
+// ---- Regression: poller must not die on IdentityRevokedError --------------
+// A revoked/stale identity once made `_run` terminate (it `return`ed on
+// IdentityRevokedError), which silently stopped polling and left the daemon
+// enforcing the last cached bundle. The loop must instead keep polling and
+// recover once the identity is valid again. This test fails against the old
+// terminal-`return` behavior.
+
+test('regression: IdentityRevokedError does not terminate the poll loop', async () => {
+  let tokenCalls = 0;
+  // First poll throws IdentityRevokedError before any fetch — exactly like a
+  // dead TokenStore whose `token()` raises. Subsequent polls have recovered.
+  const recoveringTokenStore = {
+    token() {
+      tokenCalls += 1;
+      if (tokenCalls === 1) throw new IdentityRevokedError('revoked once');
+      return 'recovered-token';
+    },
+    async forceRefresh() {},
+  };
+
+  let fetchCalls = 0;
+  // 304 keeps the body-parse path out of it; a successful pull is all we need
+  // to prove the loop kept running after the revoked-identity throw.
+  const fetchStub = async () => {
+    fetchCalls += 1;
+    return jsonResponse(null, { status: 304 });
+  };
+
+  const events = { errors: [] };
+  const poller = new BundlePoller({
+    apiUrl: 'http://localhost:9999',
+    tokenStore: recoveringTokenStore,
+    onUpdate: () => {},
+    onError: (e) => events.errors.push(e),
+    intervalMs: 10,
+    fetch: fetchStub,
+  });
+
+  poller.start();
+  // firstPullDone resolves after the first (throwing) iteration.
+  await poller.firstPullDone(5000);
+  // Wait for a later iteration to record a successful pull.
+  const deadline = Date.now() + 2000;
+  while (poller.lastPullAt === null && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  await poller.stop();
+
+  // The first iteration surfaced IdentityRevokedError via onError...
+  assert.ok(
+    events.errors.some((e) => e instanceof IdentityRevokedError),
+    'IdentityRevokedError should surface via onError',
+  );
+  // ...but the loop kept going: it fetched and recorded a successful pull.
+  assert.ok(fetchCalls >= 1, 'poller should fetch after recovering from the revoked-identity throw');
+  assert.ok(poller.lastPullAt instanceof Date, 'a successful pull should follow recovery');
+  assert.ok(tokenCalls >= 2, 'token() should be called again after the first throw');
 });

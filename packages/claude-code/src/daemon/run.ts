@@ -188,6 +188,46 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   });
   auditSink.start();
 
+  // ---- Poller self-heal on developer activity -----------------------------
+  // Defense-in-depth beside the poller's own never-die loop. If the poll has
+  // gone stale (a long offline period, a laptop sleep that drifted the timer,
+  // or a rejected identity), the next Claude Code hook kicks a re-enroll +
+  // poller restart. Fire-and-forget with a cooldown so a burst of tool calls
+  // can't spawn overlapping revivals or hammer the control plane. Staleness
+  // threshold matches `rubric doctor`'s bar so the two agree on "stuck".
+  const REVIVE_STALE_AFTER_MS = 90_000;
+  const REVIVE_COOLDOWN_MS = 30_000;
+  let lastReviveAttempt = 0;
+  let reviveInFlight = false;
+  const maybeRevivePoller = (): void => {
+    const lastPull = bundlePoller.lastPullAt;
+    const stale = lastPull === null || Date.now() - lastPull.getTime() > REVIVE_STALE_AFTER_MS;
+    if (!stale || reviveInFlight) return;
+    if (Date.now() - lastReviveAttempt < REVIVE_COOLDOWN_MS) return;
+    lastReviveAttempt = Date.now();
+    reviveInFlight = true;
+    void (async () => {
+      try {
+        logger.warn(
+          { lastPullAt: lastPull, identityDead: tokenStore.isDead() },
+          'bundle poller stale on hook activity; attempting self-heal',
+        );
+        // Re-enrollment is the load-bearing step: a stale/expired JWT can't
+        // be refreshed, only re-enrolled. `start()` is idempotent and a
+        // no-op while the never-die loop is still running.
+        if (tokenStore.isDead()) {
+          await tokenStore.reenroll();
+          logger.info('identity re-enrolled during poller self-heal');
+        }
+        bundlePoller.start();
+      } catch (err: unknown) {
+        logger.warn({ err }, 'poller self-heal failed; will retry after cooldown');
+      } finally {
+        reviveInFlight = false;
+      }
+    })();
+  };
+
   // ---- Bind the HTTP server -----------------------------------------------
 
   const startedAt = new Date();
@@ -204,6 +244,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
       ...(options.config.daemonPort !== undefined ? { port: options.config.daemonPort } : {}),
       daemonToken,
       logger,
+      onHookActivity: maybeRevivePoller,
       handlerDeps: {
         evaluator,
         audit: auditSink,

@@ -82,6 +82,15 @@ export interface StartServerOptions {
    * logged; the 202 response has already been written by then.
    */
   onShutdownRequest?: () => Promise<void> | void;
+  /**
+   * Fire-and-forget callback invoked on each authenticated `/v1/hook`
+   * request, before the decision is computed. The daemon wires this to a
+   * poller self-heal: developer activity is the only time a stale bundle
+   * has consequences, so it's the right moment to revive a stalled poller.
+   * Must not block — it runs synchronously off the request path and any
+   * throw is caught and logged, never surfaced to the caller.
+   */
+  onHookActivity?: () => void;
 }
 
 export interface RunningServer {
@@ -248,6 +257,18 @@ async function handleRequest(
     // Generic 401 — no detail leak about whether the header was missing
     // vs. invalid vs. the wrong length.
     return respondJson(res, 401, { error: 'unauthorized' });
+  }
+
+  // Self-heal on developer activity. If the bundle poller has gone stale
+  // (offline period, laptop sleep, a rejected identity), kick a revive now —
+  // fire-and-forget so it never adds latency to the decision below, which
+  // still uses the currently-cached bundle. The callback owns its cooldown.
+  if (typeof options.onHookActivity === 'function') {
+    try {
+      options.onHookActivity();
+    } catch (err: unknown) {
+      options.logger.warn({ err }, 'onHookActivity threw; ignoring');
+    }
   }
 
   const body = await readBody(req);

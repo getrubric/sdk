@@ -32,9 +32,13 @@ import RE2 from 're2';
 
 import {
   DECISION_ALLOW,
+  DECISION_ASK,
   DECISION_DENY,
   DENY_REASON_AGENT_FROZEN,
   RESULT_CODE_AGENT_FROZEN,
+  RESULT_CODE_MCP_NOT_APPROVED,
+  denyReasonMcpNotApproved,
+  parseMcpServer,
   type Decision,
 } from './constants.js';
 import type { Bundle, PolicyCondition } from './types.js';
@@ -186,6 +190,25 @@ export class Evaluator {
       };
     }
 
+    // MCP default-deny: a call to an `mcp__<server>__*` tool whose server
+    // isn't in the agent's approved set fails closed *before* policy
+    // evaluation (so even a policy-less agent gets the actionable reason).
+    // `enforce: false` (solo / local bundles) turns the gate off; absent →
+    // true so connected bundles fail closed.
+    if (bundle !== null) {
+      const parsed = parseMcpServer(request.tool_name);
+      const approvedServers = bundle.mcpAccess?.approvedServers ?? [];
+      const enforceMcp = bundle.mcpAccess?.enforce ?? true;
+      if (enforceMcp && parsed && !approvedServers.includes(parsed.server)) {
+        return {
+          decision: DECISION_DENY,
+          code: RESULT_CODE_MCP_NOT_APPROVED,
+          reason: denyReasonMcpNotApproved(parsed.server),
+          latencyMs: elapsedMs(start),
+        };
+      }
+    }
+
     // Empty bundle / cold-start is not permissive. A bundle we haven't
     // pulled yet (null) and a bundle the server says is empty are both
     // treated as "we don't know what the policy is" → deny.
@@ -197,6 +220,14 @@ export class Evaluator {
         latencyMs: elapsedMs(start),
       };
     }
+
+    // Ask is deferred + sticky: a matched `ask` is remembered and applied at
+    // the end with precedence deny > ask > allow. A later `allow` must not
+    // downgrade it; a later `deny` (which returns immediately) still wins.
+    let sawAsk = false;
+    let askPolicyId: string | null = null;
+    let askPolicyVersion: number | null = null;
+    let askRuleId: string | null = null;
 
     let finalDecision: Decision = DECISION_ALLOW;
     let matchedPolicyId: string | null = null;
@@ -234,21 +265,44 @@ export class Evaluator {
         const allMatch = rule.conditions.every((c) => this._matches(c, request));
         if (!allMatch) continue;
 
-        finalDecision = rule.effect;
-        matchedPolicyId = entry.policyId;
-        matchedPolicyVersion = entry.policyVersion;
-        matchedRuleId = rule.id;
-
-        if (finalDecision === DECISION_DENY) {
+        if (rule.effect === DECISION_DENY) {
+          // Deny is absolute and short-circuits — highest precedence.
           return {
             decision: DECISION_DENY,
-            matchedPolicyId,
-            matchedPolicyVersion,
-            matchedRuleId,
+            matchedPolicyId: entry.policyId,
+            matchedPolicyVersion: entry.policyVersion,
+            matchedRuleId: rule.id,
             latencyMs: elapsedMs(start),
           };
         }
+
+        if (rule.effect === DECISION_ASK) {
+          // Remember and keep scanning so a later deny can still override.
+          sawAsk = true;
+          askPolicyId = entry.policyId;
+          askPolicyVersion = entry.policyVersion;
+          askRuleId = rule.id;
+          continue;
+        }
+
+        // allow — last-allow-wins among allows.
+        finalDecision = DECISION_ALLOW;
+        matchedPolicyId = entry.policyId;
+        matchedPolicyVersion = entry.policyVersion;
+        matchedRuleId = rule.id;
       }
+    }
+
+    // No deny fired. Ask beats allow, so surface a pending ask before the
+    // allow / defaultEffect resolution.
+    if (sawAsk) {
+      return {
+        decision: DECISION_ASK,
+        matchedPolicyId: askPolicyId,
+        matchedPolicyVersion: askPolicyVersion,
+        matchedRuleId: askRuleId,
+        latencyMs: elapsedMs(start),
+      };
     }
 
     if (matchedPolicyId === null) {

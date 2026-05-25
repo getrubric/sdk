@@ -12,13 +12,14 @@ const VALID_HASH = '0'.repeat(64);
 
 // ---- Helpers ---------------------------------------------------------------
 
-function mkBundle({ policies = [], frozenAgentIds = [] } = {}) {
+function mkBundle({ policies = [], frozenAgentIds = [], approvedServers = [], mcpEnforce = true } = {}) {
   return {
     bundleVersion: 1,
     contentHash: VALID_HASH,
     builtAt: new Date().toISOString(),
     policies,
     frozenAgentIds,
+    mcpAccess: { approvedServers, enforce: mcpEnforce },
   };
 }
 
@@ -657,4 +658,86 @@ test('contains/starts_with/ends_with stringify numeric actuals', () => {
   );
   assert.equal(ev.evaluate({ tool_name: 'pay', input: { amount: 1000 } }).decision, 'deny');
   assert.equal(ev.evaluate({ tool_name: 'pay', input: { amount: 200 } }).decision, 'allow');
+});
+
+// ---- MCP server gating ------------------------------------------------------
+
+test('MCP: unapproved server → deny / MCP_SERVER_NOT_APPROVED, before policy eval', () => {
+  const ev = new Evaluator();
+  ev.updateBundle(
+    mkBundle({
+      policies: [mkPolicy({ rules: [rule('r1', [cond('tool_name', 'matches', '.*')], 'allow')] })],
+      approvedServers: [],
+    }),
+  );
+  const r = ev.evaluate({ tool_name: 'mcp__supabase__query', agent_id: 'a' });
+  assert.equal(r.decision, 'deny');
+  assert.equal(r.code, 'MCP_SERVER_NOT_APPROVED');
+});
+
+test('MCP: approved server falls through to policy eval (allow)', () => {
+  const ev = new Evaluator();
+  ev.updateBundle(
+    mkBundle({
+      policies: [mkPolicy({ rules: [rule('r1', [cond('tool_name', 'eq', 'mcp__supabase__query')], 'allow')] })],
+      approvedServers: ['supabase'],
+    }),
+  );
+  assert.equal(ev.evaluate({ tool_name: 'mcp__supabase__query', agent_id: 'a' }).decision, 'allow');
+});
+
+test('MCP: enforce:false leaves MCP calls alone (solo bundles)', () => {
+  const ev = new Evaluator();
+  ev.updateBundle(
+    mkBundle({
+      policies: [mkPolicy({ rules: [rule('r1', [cond('tool_name', 'eq', 'never')], 'allow')] })],
+      approvedServers: [],
+      mcpEnforce: false,
+    }),
+  );
+  assert.equal(ev.evaluate({ tool_name: 'mcp__supabase__query', agent_id: 'a' }).decision, 'allow');
+});
+
+test('MCP: non-MCP tool is unaffected by the gate', () => {
+  const ev = new Evaluator();
+  ev.updateBundle(
+    mkBundle({ policies: [mkPolicy({ rules: [rule('r1', [cond('tool_name', 'eq', 'Bash')], 'allow')] })] }),
+  );
+  assert.equal(ev.evaluate({ tool_name: 'Bash', agent_id: 'a' }).decision, 'allow');
+});
+
+// ---- ask effect (deny > ask > allow) ----------------------------------------
+
+test('ask: a matched ask rule returns ask', () => {
+  const ev = new Evaluator();
+  ev.updateBundle(mkBundle({ policies: [mkPolicy({ rules: [rule('r1', [cond('tool_name', 'eq', 'Bash')], 'ask')] })] }));
+  assert.equal(ev.evaluate({ tool_name: 'Bash', agent_id: 'a' }).decision, 'ask');
+});
+
+test('ask: deny wins over ask regardless of order', () => {
+  for (const rules of [
+    [rule('a', [cond('tool_name', 'eq', 'Bash')], 'ask'), rule('d', [cond('tool_name', 'eq', 'Bash')], 'deny')],
+    [rule('d', [cond('tool_name', 'eq', 'Bash')], 'deny'), rule('a', [cond('tool_name', 'eq', 'Bash')], 'ask')],
+  ]) {
+    const ev = new Evaluator();
+    ev.updateBundle(mkBundle({ policies: [mkPolicy({ rules })] }));
+    assert.equal(ev.evaluate({ tool_name: 'Bash', agent_id: 'a' }).decision, 'deny');
+  }
+});
+
+test('ask: ask wins over a later allow (not downgraded)', () => {
+  const ev = new Evaluator();
+  ev.updateBundle(
+    mkBundle({
+      policies: [
+        mkPolicy({
+          rules: [
+            rule('ask1', [cond('tool_name', 'eq', 'Bash')], 'ask'),
+            rule('allow1', [cond('tool_name', 'eq', 'Bash')], 'allow'),
+          ],
+        }),
+      ],
+    }),
+  );
+  assert.equal(ev.evaluate({ tool_name: 'Bash', agent_id: 'a' }).decision, 'ask');
 });

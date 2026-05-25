@@ -45,10 +45,14 @@ export const POLICY_CONDITION_OPERATOR_VALUES = [
 ] as const;
 export type PolicyConditionOperator = (typeof POLICY_CONDITION_OPERATOR_VALUES)[number];
 
-export const DECISION_VALUES = ['allow', 'deny'] as const;
+// 'ask' = defer to the human (Claude Code surfaces an approval prompt). The
+// control-plane `decision` enum stays allow|deny for now, so this is a
+// deliberate SDK-side superset used by the evaluator + permissive packs.
+export const DECISION_VALUES = ['allow', 'deny', 'ask'] as const;
 export type Decision = (typeof DECISION_VALUES)[number];
 export const DECISION_ALLOW: Decision = 'allow';
 export const DECISION_DENY: Decision = 'deny';
+export const DECISION_ASK: Decision = 'ask';
 
 // ---- SDK env vars ----------------------------------------------------------
 
@@ -130,3 +134,26 @@ export const IDENTITY_REFRESH_LEAD_SECONDS = 600;
 
 export const DENY_REASON_AGENT_FROZEN = 'agent frozen by operator';
 export const RESULT_CODE_AGENT_FROZEN = 'AGENT_FROZEN';
+
+// ---- MCP server gating -----------------------------------------------------
+// Default-deny enforcement of the per-agent MCP allow-list carried in the
+// bundle (`mcpAccess`). When the control plane ships a bundle with
+// `mcpAccess.enforce = true`, a call to an `mcp__<server>__*` tool whose
+// server isn't approved fails closed before policy evaluation.
+
+export const MCP_TOOL_NAME_PREFIX = 'mcp__';
+export const MCP_TOOL_NAME_DELIMITER = '__';
+export const RESULT_CODE_MCP_NOT_APPROVED = 'MCP_SERVER_NOT_APPROVED';
+
+/** Split `mcp__<server>__<tool>` → `{ server, tool }`; null if not MCP. */
+export function parseMcpServer(toolName: string): { server: string; tool: string } | null {
+  if (!toolName.startsWith(MCP_TOOL_NAME_PREFIX)) return null;
+  const rest = toolName.slice(MCP_TOOL_NAME_PREFIX.length);
+  const idx = rest.indexOf(MCP_TOOL_NAME_DELIMITER);
+  if (idx <= 0) return null; // server segment must be non-empty
+  return { server: rest.slice(0, idx), tool: rest.slice(idx + MCP_TOOL_NAME_DELIMITER.length) };
+}
+
+export function denyReasonMcpNotApproved(server: string): string {
+  return `MCP server "${server}" is not approved for this agent. Request access in your Rubric dashboard.`;
+}

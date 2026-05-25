@@ -105,12 +105,24 @@ export const BundlePolicyEntrySchema = z.object({
 });
 export type BundlePolicyEntry = z.infer<typeof BundlePolicyEntrySchema>;
 
+// Per-agent MCP allow-list carried in the bundle. Default-deny when
+// `enforce` is true: an `mcp__<server>__*` call whose server slug isn't in
+// `approvedServers` is blocked by the evaluator. Older control planes may omit
+// the whole object — `.default()` keeps such bundles valid, and an absent
+// `enforce` defaults true so connected bundles fail closed.
+export const BundleMcpAccessSchema = z.object({
+  approvedServers: z.array(z.string().min(1)).default([]),
+  enforce: z.boolean().default(true),
+});
+export type BundleMcpAccess = z.infer<typeof BundleMcpAccessSchema>;
+
 export const BundleSchema = z.object({
   bundleVersion: z.number().int().nonnegative(),
   contentHash: z.string().regex(/^[a-f0-9]{64}$/),
   builtAt: z.string().datetime(),
   policies: z.array(BundlePolicyEntrySchema),
   frozenAgentIds: z.array(z.string().min(1).max(128)).default([]),
+  mcpAccess: BundleMcpAccessSchema.default({ approvedServers: [], enforce: true }),
 });
 export type Bundle = z.infer<typeof BundleSchema>;
 

@@ -167,6 +167,37 @@ MCP_TOOL_NAME_PREFIX: Final = "mcp__"
 MCP_TOOL_NAME_DELIMITER: Final = "__"
 MCP_TOOL_NAME_PARTS: Final = 3  # "mcp", "<server>", "<tool>"
 
+# ---- MCP server gating ------------------------------------------------------
+# Default-deny enforcement of the per-agent MCP allow-list carried in the
+# bundle (`mcpAccess`). When the control plane ships a bundle with
+# `mcpAccess.enforce = true`, a call to an `mcp__<server>__*` tool whose
+# server isn't approved fails closed before policy evaluation. Mirrors
+# `parseMcpServer` / `RESULT_CODE_MCP_NOT_APPROVED` in the Node SDK core.
+
+RESULT_CODE_MCP_NOT_APPROVED: Final = "MCP_SERVER_NOT_APPROVED"
+
+
+def parse_mcp_server(tool_name: str) -> tuple[str, str] | None:
+    """Split ``mcp__<server>__<tool>`` → ``(server, tool)``; ``None`` if not MCP.
+
+    Returns ``None`` when the name isn't MCP-prefixed or the server segment
+    would be empty, matching the Node SDK's ``parseMcpServer``.
+    """
+    if not tool_name.startswith(MCP_TOOL_NAME_PREFIX):
+        return None
+    rest = tool_name[len(MCP_TOOL_NAME_PREFIX):]
+    idx = rest.find(MCP_TOOL_NAME_DELIMITER)
+    if idx <= 0:  # server segment must be non-empty
+        return None
+    return rest[:idx], rest[idx + len(MCP_TOOL_NAME_DELIMITER):]
+
+
+def deny_reason_mcp_not_approved(server: str) -> str:
+    return (
+        f'MCP server "{server}" is not approved for this agent. '
+        "Request access in your Rubric dashboard."
+    )
+
 # ---- Claude Agent SDK hook names / fields -----------------------------------
 
 HOOK_EVENT_PRE_TOOL_USE: Final = "PreToolUse"

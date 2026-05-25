@@ -18,20 +18,36 @@ import { readFileSecure, writeFileSecure } from '../config/fs-secure.js';
 // Re-export so existing imports from `../cli/_config` keep working.
 export { validateApiUrl };
 
-export const PersistedConfigSchema = z.object({
-  apiUrl: z
-    .string()
-    .url()
-    .refine(
-      (v) => validateApiUrl(v) === null,
-      (v) => ({ message: validateApiUrl(v) ?? 'invalid' }),
-    ),
-  agentName: z.string().min(1).max(128),
-  // Enrollment is idempotent on agentName; we keep the token so the
-  // daemon can re-enroll on every cold boot (matches Python SDK).
-  enrollmentToken: z.string().min(1),
-  daemonPort: z.number().int().min(1).max(65535).optional(),
-});
+export const PersistedConfigSchema = z
+  .object({
+    // 'solo' = local-only enforcement, no account/tenant/network. 'connected'
+    // = enrolled against a tenant. Defaults to 'connected' so pre-existing
+    // config files keep working unchanged.
+    mode: z.enum(['solo', 'connected']).default('connected'),
+    // Required in connected mode; absent in solo (validated by the refine).
+    apiUrl: z
+      .string()
+      .url()
+      .refine(
+        (v) => validateApiUrl(v) === null,
+        (v) => ({ message: validateApiUrl(v) ?? 'invalid' }),
+      )
+      .optional(),
+    agentName: z.string().min(1).max(128),
+    // Enrollment is idempotent on agentName; we keep the token so the
+    // daemon can re-enroll on every cold boot (matches Python SDK).
+    enrollmentToken: z.string().min(1).optional(),
+    daemonPort: z.number().int().min(1).max(65535).optional(),
+    // Anonymous, counts-only telemetry. Defaults on; set false here or
+    // RUBRIC_TELEMETRY=0 to opt out.
+    telemetry: z.boolean().optional(),
+  })
+  .refine(
+    (c) =>
+      c.mode === 'solo' ||
+      (typeof c.apiUrl === 'string' && typeof c.enrollmentToken === 'string'),
+    { message: 'connected mode requires apiUrl and enrollmentToken' },
+  );
 export type PersistedConfig = z.infer<typeof PersistedConfigSchema>;
 
 export function readConfig(configFile: string): PersistedConfig {

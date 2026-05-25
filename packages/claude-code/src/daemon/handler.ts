@@ -114,13 +114,10 @@ export function handleHookPayload(payload: HookPayload, deps: HandlerDeps): Hook
         hookSpecificOutput: {
           hookEventName: HOOK_EVENT_PRE_TOOL_USE,
           permissionDecision: result.decision,
-          // Surface a useful reason on deny so the developer sees *why*
-          // Claude Code blocked their call. Allows don't need one — the
-          // dashboard already records the matched rule for audit.
-          ...(result.decision === 'deny'
-            ? {
-                permissionDecisionReason: buildDenyReason(result),
-              }
+          // Surface a reason on deny (why it was blocked) and on ask (why
+          // Claude Code is prompting). Allows don't need one.
+          ...(result.decision === 'deny' || result.decision === 'ask'
+            ? { permissionDecisionReason: buildDecisionReason(result.decision, result) }
             : {}),
         },
       };
@@ -201,14 +198,19 @@ function assertNever(x: never): never {
  * Code terminal. Prefer the policy's explicit reason if present (set
  * by the kill-switch path), otherwise reconstruct a useful sentence.
  */
-function buildDenyReason(result: {
-  reason?: string;
-  matchedPolicyId?: string | null;
-  matchedRuleId?: string | null;
-  code?: string;
-}): string {
+function buildDecisionReason(
+  decision: 'deny' | 'ask',
+  result: {
+    reason?: string;
+    matchedPolicyId?: string | null;
+    matchedRuleId?: string | null;
+    code?: string;
+  },
+): string {
   if (result.reason) return result.reason;
   const policy = result.matchedPolicyId ? `policy ${result.matchedPolicyId}` : 'a policy';
   const rule = result.matchedRuleId ? ` (rule ${result.matchedRuleId})` : '';
-  return `Rubric denied this call: ${policy}${rule} matched.`;
+  return decision === 'ask'
+    ? `Rubric flagged this call for your approval: ${policy}${rule} matched.`
+    : `Rubric denied this call: ${policy}${rule} matched.`;
 }

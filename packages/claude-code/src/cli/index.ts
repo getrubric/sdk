@@ -20,8 +20,9 @@ program
   .version(readVersion());
 
 program
-  .command('init')
-  .description('Interactive enrollment + filesystem setup + daemon start.')
+  .command('init', { isDefault: true })
+  .description('Set up Rubric for Claude Code (interactive picker: solo / account / team).')
+  .option('--mode <mode>', 'skip the picker: "solo" (no account) or "connected" (enroll)')
   .option('--api-url <url>', 'Rubric API base URL (skip prompt)')
   .option('--agent-name <name>', 'agent name in the dashboard (skip prompt)')
   .option('--enrollment-token <token>', 'enrollment token from the dashboard (skip prompt)')
@@ -30,7 +31,17 @@ program
   .option('--force', 're-run init even if config already exists')
   .action(async (opts) => {
     const { runInit } = await import('./init.js');
-    await runInit(opts);
+    // Commander maps `--no-start` → opts.start=false (not opts.noStart);
+    // normalize the negated flags into InitOptions explicitly.
+    await runInit({
+      ...(opts.mode ? { mode: opts.mode } : {}),
+      ...(opts.apiUrl ? { apiUrl: opts.apiUrl } : {}),
+      ...(opts.agentName ? { agentName: opts.agentName } : {}),
+      ...(opts.enrollmentToken ? { enrollmentToken: opts.enrollmentToken } : {}),
+      noStart: opts.start === false,
+      noSettingsPatch: opts.settingsPatch === false,
+      force: Boolean(opts.force),
+    });
   });
 
 program

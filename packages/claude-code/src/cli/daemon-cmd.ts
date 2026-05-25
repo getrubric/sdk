@@ -32,10 +32,12 @@ export async function runDaemonCmd(options: DaemonCmdOptions = {}): Promise<void
   // SIGTERM/SIGINT handlers internally, so we just await it.
   await runDaemon({
     config: {
-      apiUrl: config.apiUrl,
+      mode: config.mode,
+      ...(config.apiUrl !== undefined ? { apiUrl: config.apiUrl } : {}),
       agentName: config.agentName,
-      enrollmentToken: config.enrollmentToken,
+      ...(config.enrollmentToken !== undefined ? { enrollmentToken: config.enrollmentToken } : {}),
       ...(config.daemonPort !== undefined ? { daemonPort: config.daemonPort } : {}),
+      ...(config.telemetry !== undefined ? { telemetry: config.telemetry } : {}),
     },
     paths,
     ...(options.logLevel ? { logLevel: options.logLevel } : {}),

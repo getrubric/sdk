@@ -12,13 +12,16 @@ import {
   BundlePoller,
   Evaluator,
   GovernanceError,
+  PolicyDocumentSchema,
   bootstrapTokenStore,
   errCode,
   scrubSecrets,
+  type PolicyDocument,
   type TokenStore,
 } from '@rubric-app/core';
 
 import type { Paths } from '../config/paths.js';
+import { DEFAULT_SAFETY_PACK, compileLocalBundle } from '../policies/default-pack.js';
 
 
 import {
@@ -27,8 +30,10 @@ import {
   removePortFile,
   writePortFile,
 } from './lifecycle.js';
+import { LocalAuditSink } from './local-audit.js';
 import { createLogger, type Logger } from './logger.js';
 import { startServer, type RunningServer } from './server.js';
+import { Telemetry, loadOrCreateInstallId, telemetryEnabled } from './telemetry.js';
 
 const DEFAULT_FIRST_PULL_TIMEOUT_MS = 10_000;
 
@@ -38,14 +43,18 @@ const DEFAULT_FIRST_PULL_TIMEOUT_MS = 10_000;
 const HEX64_REGEX = /^[a-f0-9]{64}$/;
 
 export interface DaemonConfig {
-  /** Rubric API base URL. */
-  apiUrl: string;
+  /** 'solo' = local-only enforcement; 'connected' = enrolled against a tenant. */
+  mode?: 'solo' | 'connected';
+  /** Rubric API base URL. Connected mode only. */
+  apiUrl?: string;
   /** Stable name for this agent in the dashboard. */
   agentName: string;
-  /** Org-issued enrollment token. Stored at `paths.configFile`. */
-  enrollmentToken: string;
+  /** Org-issued enrollment token. Stored at `paths.configFile`. Connected mode only. */
+  enrollmentToken?: string;
   /** Requested daemon port. Falls back to OS-assigned if in use. */
   daemonPort?: number;
+  /** Anonymous telemetry opt-out (false = off). Defaults on. */
+  telemetry?: boolean;
 }
 
 export interface RunDaemonOptions {
@@ -89,6 +98,13 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   const pidGuard = new PidGuard({ pidFile: options.paths.pidFile, logger });
   pidGuard.claim();
 
+  // Solo mode: no identity, no control plane, no audit upload. Evaluate
+  // locally against the baked-in/editable safety pack and serve hooks. The
+  // connected path below is untouched.
+  if (options.config.mode === 'solo') {
+    return runSolo(options, logger, daemonToken, pidGuard);
+  }
+
   // ---- Bring up the core stack --------------------------------------------
   // Order matters: identity must be live before the bundle poller and
   // audit sink can authenticate; bundle must seed the evaluator before
@@ -96,12 +112,21 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   // the empty-bundle `allow` path, which is permissive — we don't want
   // that on cold start, see plan §Failure-mode matrix).
 
+  // Connected mode requires both (config validation guarantees it; narrow for
+  // the type system and fail loud if a hand-edited config violates it).
+  const { apiUrl, enrollmentToken } = options.config;
+  if (apiUrl === undefined || enrollmentToken === undefined) {
+    logger.fatal('connected mode requires apiUrl and enrollmentToken');
+    pidGuard.release();
+    throw new GovernanceError('connected mode requires apiUrl and enrollmentToken');
+  }
+
   let tokenStore: TokenStore;
   try {
     tokenStore = await bootstrapTokenStore({
-      apiUrl: options.config.apiUrl,
+      apiUrl,
       agentName: options.config.agentName,
-      enrollmentToken: options.config.enrollmentToken,
+      enrollmentToken,
     });
   } catch (err: unknown) {
     logger.fatal({ err }, 'identity enrollment failed; daemon cannot start');
@@ -119,7 +144,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   });
 
   const bundlePoller = new BundlePoller({
-    apiUrl: options.config.apiUrl,
+    apiUrl,
     tokenStore,
     onUpdate: (bundle) => {
       evaluator.updateBundle(bundle);
@@ -182,7 +207,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   }
 
   const auditSink = new AuditSink({
-    apiUrl: options.config.apiUrl,
+    apiUrl,
     tokenStore,
     onError: (err) => logger.warn({ err }, 'audit sink error'),
   });
@@ -331,6 +356,116 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
       onShutdown: shutdownTrigger,
     });
   });
+}
+
+/**
+ * Solo-mode daemon: fully local enforcement. Skips enrollment, the bundle
+ * poller, and the audit-upload sink. Loads the editable local policy pack
+ * (falling back to the compiled-in default), feeds it to the Evaluator, and
+ * serves the same hook server with a local audit sink. Nothing leaves the
+ * machine.
+ */
+async function runSolo(
+  options: RunDaemonOptions,
+  logger: Logger,
+  daemonToken: string,
+  pidGuard: PidGuard,
+): Promise<void> {
+  const evaluator = new Evaluator({
+    onCompileError: ({ policyId, ruleId, pattern, cause }) =>
+      logger.warn({ policyId, ruleId, pattern, err: cause }, 'policy regex failed to compile'),
+  });
+
+  const pack = loadLocalPack(options.paths.policiesFile, logger);
+  evaluator.updateBundle(compileLocalBundle(pack));
+  logger.info({ policies: pack.length, source: options.paths.policiesFile }, 'solo policy pack loaded');
+
+  const telemetry = new Telemetry({
+    installId: loadOrCreateInstallId(options.paths.telemetryIdFile),
+    enabled: telemetryEnabled(options.config.telemetry),
+  });
+  telemetry.emit('daemon_start', { mode: 'solo' });
+
+  const agentId = `solo:${options.config.agentName}`;
+  const audit = new LocalAuditSink(logger, telemetry);
+
+  let shutdownTrigger: (() => Promise<void>) | null = null;
+  let server: RunningServer;
+  try {
+    server = await startServer({
+      ...(options.config.daemonPort !== undefined ? { port: options.config.daemonPort } : {}),
+      daemonToken,
+      logger,
+      handlerDeps: { evaluator, audit, agentId },
+      onShutdownRequest: async () => {
+        if (shutdownTrigger === null) return;
+        await shutdownTrigger();
+      },
+    });
+  } catch (err: unknown) {
+    logger.fatal({ err }, 'failed to bind daemon HTTP server');
+    pidGuard.release();
+    throw err;
+  }
+  writePortFile(options.paths.daemonPortFile, server.port);
+  logger.info({ port: server.port, host: server.host, mode: 'solo' }, 'daemon ready');
+
+  const shutdown = async (): Promise<void> => {
+    logger.info('shutting down');
+    await server.close().catch((err) => logger.warn({ err }, 'server.close failed'));
+    removePortFile(options.paths.daemonPortFile);
+    pidGuard.release();
+    logger.info('shutdown complete');
+  };
+
+  return new Promise<void>((resolve, reject) => {
+    let shutdownInFlight: Promise<void> | null = null;
+    shutdownTrigger = (): Promise<void> => {
+      if (shutdownInFlight !== null) return shutdownInFlight;
+      shutdownInFlight = (async () => {
+        try {
+          await shutdown();
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      })();
+      return shutdownInFlight;
+    };
+    installSignalHandlers({ logger, onShutdown: shutdownTrigger });
+  });
+}
+
+/**
+ * Read the editable local policy pack. Returns the compiled-in default pack on
+ * a missing/invalid file — solo mode must NEVER fail closed (deny-all would
+ * break the developer's Claude Code). File shape: `{ policies: [{ id, document }] }`.
+ */
+function loadLocalPack(
+  policiesFile: string,
+  logger: Logger,
+): ReadonlyArray<{ id: string; document: PolicyDocument }> {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(policiesFile, 'utf8');
+  } catch {
+    return DEFAULT_SAFETY_PACK;
+  }
+  try {
+    const parsed = JSON.parse(raw) as { policies?: unknown };
+    const list = Array.isArray(parsed.policies) ? parsed.policies : [];
+    const out: { id: string; document: PolicyDocument }[] = [];
+    for (const item of list) {
+      const entry = item as { id?: unknown; document?: unknown };
+      if (typeof entry.id !== 'string') throw new Error('policy entry missing string id');
+      out.push({ id: entry.id, document: PolicyDocumentSchema.parse(entry.document) });
+    }
+    if (out.length === 0) throw new Error('no policies in file');
+    return out;
+  } catch (err: unknown) {
+    logger.warn({ err, policiesFile }, 'local policy file invalid; using baked-in default pack');
+    return DEFAULT_SAFETY_PACK;
+  }
 }
 
 // ---- Helpers ---------------------------------------------------------------

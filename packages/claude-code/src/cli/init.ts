@@ -27,6 +27,13 @@ import { installService, kickstartService } from '../config/services/index.js';
 import { applyRubricHooks } from '../config/settings-json.js';
 import { writeEnsureDaemonScript } from '../config/ensure-daemon-script.js';
 import { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT } from '../daemon/server.js';
+import {
+  TELEMETRY_NOTICE,
+  Telemetry,
+  loadOrCreateInstallId,
+  telemetryEnabled,
+} from '../daemon/telemetry.js';
+import { DEFAULT_SAFETY_PACK } from '../policies/default-pack.js';
 
 import {
   configExists,
@@ -37,7 +44,11 @@ import {
 } from './_config.js';
 import { dim, fail, header, info, ok, warn } from './_format.js';
 
+export type InitMode = 'solo' | 'connected';
+
 export interface InitOptions {
+  /** Skip the picker: 'solo' (no account) or 'connected' (enroll). */
+  mode?: InitMode;
   apiUrl?: string;
   agentName?: string;
   enrollmentToken?: string;
@@ -51,7 +62,7 @@ export interface InitOptions {
 
 export async function runInit(options: InitOptions = {}): Promise<void> {
   const paths = defaultPaths();
-  process.stdout.write(`${header('Rubric Claude Code adapter — init')}\n\n`);
+  process.stdout.write(`${header('Rubric — guardrails for Claude Code')}\n\n`);
 
   if (configExists(paths.configFile) && !options.force) {
     process.stdout.write(
@@ -61,38 +72,136 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
     return;
   }
 
-  const config = await collectConfig(options, paths);
+  const choice = await chooseMode(options);
+  if (choice === 'create') {
+    printCreateAccountBridge();
+    return;
+  }
+  if (choice === 'solo') {
+    await runSoloInit(paths, options);
+  } else {
+    await runConnectedInit(paths, options);
+  }
+}
 
-  // Validate the resolved API URL regardless of source (prompt
-  // captures interactive entry but --api-url / RUBRIC_API_URL bypass
-  // the prompt entirely). Throw before any HTTP roundtrip.
-  {
-    const err = validateApiUrl(config.apiUrl);
-    if (err !== null) {
-      process.stderr.write(`${fail(`invalid API URL: ${err}`)}\n`);
-      process.exit(1);
-    }
+/**
+ * Decide how to onboard. Explicit flags / env (CI, scripting) skip the picker;
+ * an interactive TTY shows the three-way choice; a non-TTY with no signal is an
+ * error rather than a hung prompt.
+ */
+async function chooseMode(options: InitOptions): Promise<'solo' | 'connected' | 'create'> {
+  if (options.mode === 'solo') return 'solo';
+  if (
+    options.mode === 'connected' ||
+    options.enrollmentToken ||
+    process.env['RUBRIC_ENROLLMENT_TOKEN']
+  ) {
+    return 'connected';
+  }
+  if (!process.stdin.isTTY) {
+    process.stderr.write(
+      `${fail('non-interactive shell: pass --mode solo or --enrollment-token <token>')}\n`,
+    );
+    process.exit(1);
+  }
+  const { choice } = await prompts(
+    {
+      type: 'select',
+      name: 'choice',
+      message: 'How do you want to run Rubric?',
+      choices: [
+        {
+          title: 'Just protect me — no account (recommended)',
+          description: 'Local guardrails. Nothing leaves your machine.',
+          value: 'solo',
+        },
+        {
+          title: 'Create a Rubric account',
+          description: 'Sync, history, and share guardrails with your team.',
+          value: 'create',
+        },
+        {
+          title: 'Join my team’s workspace',
+          description: 'Enroll with a token from your org’s dashboard.',
+          value: 'connected',
+        },
+      ],
+      initial: 0,
+    },
+    {
+      onCancel: () => {
+        process.stderr.write(`${fail('init cancelled')}\n`);
+        process.exit(1);
+      },
+    },
+  );
+  return choice as 'solo' | 'connected' | 'create';
+}
+
+/** Solo onboarding: no account, local default pack, nothing leaves the machine. */
+async function runSoloInit(paths: Paths, options: InitOptions): Promise<void> {
+  const agentName =
+    options.agentName ?? process.env['RUBRIC_AGENT_NAME'] ?? `claude-code-${shortHostname()}`;
+
+  fs.mkdirSync(paths.configDir, { recursive: true, mode: 0o700 });
+  ensureDirMode(paths.configDir, 0o700);
+  writeConfig(paths.configFile, { mode: 'solo', agentName });
+  process.stdout.write(`${ok(`wrote ${dim(paths.configFile)}`)}\n`);
+
+  // Materialize the editable default safety pack the daemon enforces.
+  writeFileSecure(
+    paths.policiesFile,
+    JSON.stringify({ policies: DEFAULT_SAFETY_PACK }, null, 2) + '\n',
+    { mode: 0o644 },
+  );
+  process.stdout.write(`${ok(`installed default safety pack → ${dim(paths.policiesFile)}`)}\n`);
+
+  await finishInstall(paths, options);
+
+  // Anonymous, counts-only install ping (opt-out honored). Best-effort.
+  new Telemetry({
+    installId: loadOrCreateInstallId(paths.telemetryIdFile),
+    enabled: telemetryEnabled(),
+  }).emit('install', { mode: 'solo' });
+
+  if (!options.noStart) {
+    process.stdout.write(
+      `\n${ok('Rubric is guarding Claude Code.')} Dangerous actions (destructive shell, secret files, internal fetches) are blocked; everything else runs free.\n` +
+        `  ${dim('Nothing leaves your machine.')} Edit ${dim(paths.policiesFile)} to tune the rules.\n` +
+        `  Run ${dim('rubric login')} anytime to sync, audit, and share with your team.\n` +
+        `  ${dim(TELEMETRY_NOTICE)}\n`,
+    );
+  }
+}
+
+/** Connected onboarding: enroll into an existing org with a dashboard token. */
+async function runConnectedInit(paths: Paths, options: InitOptions): Promise<void> {
+  const config = await collectConfig(options, paths);
+  const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
+  const enrollmentToken = config.enrollmentToken;
+
+  const urlErr = validateApiUrl(apiUrl);
+  if (urlErr !== null) {
+    process.stderr.write(`${fail(`invalid API URL: ${urlErr}`)}\n`);
+    process.exit(1);
+  }
+  if (!enrollmentToken) {
+    process.stderr.write(`${fail('an enrollment token is required to join a workspace')}\n`);
+    process.exit(1);
   }
 
   // ---- Test-enroll BEFORE writing anything --------------------------------
-  // This is the slow part of init (HTTP roundtrip) but it's also the only
-  // step that can fail in a way the user didn't anticipate. Front-load it
-  // so a wrong token doesn't leave a half-finished install.
   process.stdout.write(`${info('verifying enrollment token…')}\n`);
   let agentId: string;
   try {
-    const store = await bootstrapTokenStore({
-      apiUrl: config.apiUrl,
-      agentName: config.agentName,
-      enrollmentToken: config.enrollmentToken,
-    });
+    const store = await bootstrapTokenStore({ apiUrl, agentName: config.agentName, enrollmentToken });
     agentId = store.agentId;
-    await store.stop(); // stop refresh loop; daemon will re-enroll on its own.
+    await store.stop();
   } catch (err: unknown) {
     process.stderr.write(
       `${fail(`enrollment failed: ${(err as Error).message}`)}\n` +
         `\nCheck that:\n` +
-        `  - the API URL is reachable (curl ${config.apiUrl}/health)\n` +
+        `  - the API URL is reachable (curl ${apiUrl}/health)\n` +
         `  - the enrollment token is current and not already used past its cap\n` +
         `  - the agentName is unique within your org\n`,
     );
@@ -100,33 +209,35 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
   }
   process.stdout.write(`${ok(`enrolled as ${dim(agentId)}`)}\n`);
 
-  // ---- Write config files --------------------------------------------------
-  // mkdirSync with `mode` only applies to the *new* directory; if
-  // configDir already exists at 0755 (e.g. left behind by a previous
-  // tool), it stays 0755. `ensureDirMode` fixes that.
   fs.mkdirSync(paths.configDir, { recursive: true, mode: 0o700 });
   ensureDirMode(paths.configDir, 0o700);
   writeConfig(paths.configFile, config);
   process.stdout.write(`${ok(`wrote ${dim(paths.configFile)}`)}\n`);
 
+  await finishInstall(paths, options);
+
+  if (!options.noStart) {
+    process.stdout.write(`\n${info('next:')} ${dim('rubric doctor')}  to confirm everything is wired up\n`);
+  }
+}
+
+/**
+ * Shared install tail for both modes: daemon token, ensure-daemon script,
+ * Claude Code settings patch (same hook for solo + connected), and starting
+ * the daemon via the platform service (with token-rotation kickstart +
+ * health wait) or a detached spawn. Each caller writes its own config first.
+ */
+async function finishInstall(paths: Paths, options: InitOptions): Promise<void> {
   const daemonToken = crypto.randomBytes(32).toString('hex');
-  // writeFileSecure refuses symlinks (O_NOFOLLOW + lstat pre-check)
-  // and explicitly chmods after write so 0600 sticks on overwrite.
   writeFileSecure(paths.daemonTokenFile, daemonToken + '\n', { mode: 0o600 });
   process.stdout.write(`${ok(`wrote ${dim(paths.daemonTokenFile)} (0600)`)}\n`);
 
-  // ---- Write ensure-daemon hook script -----------------------------------
-  // The shell script is invoked by Claude Code's `command`-type hook
-  // before each Rubric http hook. It curls the daemon's /healthz and,
-  // on miss, kicks the platform service manager so a downed or hung
-  // daemon self-revives without user intervention.
   writeEnsureDaemonScript(paths.ensureDaemonScriptFile, {
     daemonHost: DEFAULT_DAEMON_HOST,
     daemonPort: DEFAULT_DAEMON_PORT,
   });
   process.stdout.write(`${ok(`wrote ${dim(paths.ensureDaemonScriptFile)} (0755)`)}\n`);
 
-  // ---- Patch ~/.claude/settings.json --------------------------------------
   if (!options.noSettingsPatch) {
     patchClaudeSettings(paths.claudeSettingsFile, daemonToken, paths.ensureDaemonScriptFile);
     process.stdout.write(`${ok(`patched ${dim(paths.claudeSettingsFile)}`)}\n`);
@@ -134,75 +245,67 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
     process.stdout.write(`${info(`skipped settings.json patch (--no-settings-patch)`)}\n`);
   }
 
-  // ---- Install service (launchd / systemd) — fall back to detached spawn -
-  if (!options.noStart) {
-    const cliEntry = resolveCliEntry();
-    const result = await installService({
-      paths,
-      nodeBinary: process.execPath,
-      cliEntry,
-    });
-    if (result.platform === 'unsupported') {
-      // Unknown platform → detached child. Survives terminal close, not reboot.
-      spawnDetachedDaemon();
-      process.stdout.write(
-        `${warn(`no service manager for ${process.platform}; spawning detached daemon`)}\n` +
-          `${ok(`daemon spawned`)}  ${dim(`(pid in ${paths.pidFile})`)}\n`,
-      );
-    } else if (result.loaded) {
-      process.stdout.write(
-        `${ok(`installed ${result.platform} service`)}  ${dim(result.message)}\n`,
-      );
-      // Force-restart so the daemon picks up the newly-rotated bearer
-      // token and the newly-written ensure-daemon script path.
-      // bootstrap/enable are no-ops on an already-loaded unit, so
-      // without this kick a re-init leaves the running process holding
-      // the previous token in memory and every hook 401's.
-      const kick = await kickstartService();
-      if (kick.kicked) {
-        process.stdout.write(`${ok(`restarted daemon`)}  ${dim(kick.message)}\n`);
-        // Poll /healthz so init doesn't return until the daemon is
-        // actually serving — without this, doctor run immediately
-        // after init shows red checks because the daemon is still
-        // mid-startup (Node init + first bundle pull takes a beat).
-        const ready = await waitForDaemonHealth(DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT);
-        if (!ready) {
-          process.stdout.write(
-            `${warn('daemon did not come up within 10s — run `rubric doctor` to inspect')}\n`,
-          );
-        }
-      } else {
+  if (options.noStart) {
+    process.stdout.write(
+      `${info('daemon not started (--no-start)')} — start it with ${dim('rubric daemon')}.\n`,
+    );
+    return;
+  }
+
+  const cliEntry = resolveCliEntry();
+  const result = await installService({ paths, nodeBinary: process.execPath, cliEntry });
+  if (result.platform === 'unsupported') {
+    spawnDetachedDaemon();
+    process.stdout.write(
+      `${warn(`no service manager for ${process.platform}; spawning detached daemon`)}\n` +
+        `${ok('daemon spawned')}  ${dim(`(pid in ${paths.pidFile})`)}\n`,
+    );
+  } else if (result.loaded) {
+    process.stdout.write(`${ok(`installed ${result.platform} service`)}  ${dim(result.message)}\n`);
+    const kick = await kickstartService();
+    if (kick.kicked) {
+      process.stdout.write(`${ok('restarted daemon')}  ${dim(kick.message)}\n`);
+      const ready = await waitForDaemonHealth(DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT);
+      if (!ready) {
         process.stdout.write(
-          `${warn(
-            `daemon may need a manual restart to pick up the new token: ${kick.message}`,
-          )}\n`,
-        );
-      }
-      if (result.platform === 'systemd') {
-        process.stdout.write(
-          `${dim('  tip: run `loginctl enable-linger $USER` if you want the daemon to keep running after logout')}\n`,
+          `${warn('daemon did not come up within 10s — run `rubric doctor` to inspect')}\n`,
         );
       }
     } else {
-      // File was written but the service manager rejected loading — fall back.
-      process.stdout.write(`${warn(result.message)}\n`);
-      spawnDetachedDaemon();
       process.stdout.write(
-        `${ok(`daemon spawned as fallback`)}  ${dim(`(pid in ${paths.pidFile})`)}\n` +
-          `${dim('  load the service manually once the issue is fixed; see ' + (result.filePath ?? ''))}\n`,
+        `${warn(`daemon may need a manual restart to pick up the new token: ${kick.message}`)}\n`,
       );
     }
-    process.stdout.write(`\n${info('next:')} ${dim('rubric doctor')}  to confirm everything is wired up\n`);
+    if (result.platform === 'systemd') {
+      process.stdout.write(
+        `${dim('  tip: run `loginctl enable-linger $USER` if you want the daemon to keep running after logout')}\n`,
+      );
+    }
   } else {
+    process.stdout.write(`${warn(result.message)}\n`);
+    spawnDetachedDaemon();
     process.stdout.write(
-      `${info('init complete — daemon not started (--no-start)')}\n` +
-        `  Start it manually with ${dim('rubric daemon')} or via your service supervisor.\n`,
+      `${ok('daemon spawned as fallback')}  ${dim(`(pid in ${paths.pidFile})`)}\n` +
+        `${dim('  load the service manually once the issue is fixed; see ' + (result.filePath ?? ''))}\n`,
     );
   }
 }
 
+function printCreateAccountBridge(): void {
+  // The seamless `rubric login` browser handshake isn't built yet; bridge
+  // through web signup + the enrollment-token path so the picker option works.
+  const signupUrl = 'https://app.rubric-app.com/sign-up';
+  process.stdout.write(
+    `${info('Create your Rubric workspace in the browser:')} ${dim(signupUrl)}\n` +
+      `  Then grab an enrollment token from the dashboard and run:\n` +
+      `  ${dim('rubric init --enrollment-token <token>')}\n` +
+      `  (Seamless one-step ${dim('rubric login')} is coming soon.)\n`,
+  );
+}
+
 // ---- Helpers ---------------------------------------------------------------
 
+/** Connected-mode config collection (apiUrl + agentName + enrollment token). */
 async function collectConfig(options: InitOptions, paths: Paths): Promise<PersistedConfig> {
   // Reuse existing answers as defaults when forcing a re-run.
   let existing: Partial<PersistedConfig> = {};
@@ -267,6 +370,7 @@ async function collectConfig(options: InitOptions, paths: Paths): Promise<Persis
   });
 
   return {
+    mode: 'connected',
     apiUrl,
     agentName: (agentName ?? responses['agentName']) as string,
     enrollmentToken: (enrollmentToken ?? responses['enrollmentToken']) as string,

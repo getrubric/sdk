@@ -29,6 +29,10 @@ export interface Paths {
    * self-heals before the http hook fires.
    */
   ensureDaemonScriptFile: string;
+  /** Solo mode: the editable local policy pack the daemon enforces. */
+  policiesFile: string;
+  /** Random anonymous install id for opt-out telemetry (not a user id). */
+  telemetryIdFile: string;
 }
 
 /**
@@ -59,5 +63,7 @@ export function defaultPaths(home: string = os.homedir(), platform: NodeJS.Platf
     logFile: path.join(logBase, 'claude-code.log'),
     claudeSettingsFile: path.join(home, '.claude', 'settings.json'),
     ensureDaemonScriptFile: path.join(configDir, 'ensure-daemon.sh'),
+    policiesFile: path.join(configDir, 'policies.json'),
+    telemetryIdFile: path.join(configDir, 'telemetry-id'),
   };
 }

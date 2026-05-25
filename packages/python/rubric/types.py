@@ -25,6 +25,7 @@ __all__ = [
     "PolicySpec",
     "PolicyDocument",
     "BundlePolicyEntry",
+    "BundleMcpAccess",
     "Bundle",
     "AuditEvent",
     "EvaluationRequest",
@@ -114,6 +115,20 @@ class BundlePolicyEntry(_StrictModel):
     document: PolicyDocument
 
 
+class BundleMcpAccess(_StrictModel):
+    """Per-agent MCP allow-list carried in the bundle.
+
+    `approvedServers` lists the MCP server names this agent may call; when
+    `enforce` is true the evaluator default-denies any `mcp__<server>__*`
+    call whose server isn't on the list, before policy evaluation. Both
+    fields default so a bundle that omits `mcpAccess` (older control plane)
+    parses unchanged. Mirrors `BundleMcpAccessSchema` in the Node SDK core.
+    """
+
+    approvedServers: list[Annotated[str, Field(min_length=1)]] = Field(default_factory=list)
+    enforce: bool = True
+
+
 class Bundle(_StrictModel):
     bundleVersion: int = Field(ge=0)
     contentHash: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -122,6 +137,9 @@ class Bundle(_StrictModel):
     frozenAgentIds: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
         default_factory=list
     )
+    # Default-constructed so bundles from an older control plane (no
+    # `mcpAccess`) still parse; `enforce=True` keeps the gate on by default.
+    mcpAccess: BundleMcpAccess = Field(default_factory=BundleMcpAccess)
 
 
 class EvaluationMetadata(BaseModel):

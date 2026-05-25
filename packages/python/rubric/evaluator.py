@@ -26,6 +26,9 @@ from rubric.constants import (
     DENY_REASON_AGENT_FROZEN,
     Decision,
     RESULT_CODE_AGENT_FROZEN,
+    RESULT_CODE_MCP_NOT_APPROVED,
+    deny_reason_mcp_not_approved,
+    parse_mcp_server,
 )
 from rubric.types import (
     Bundle,
@@ -228,6 +231,20 @@ class Evaluator:
                 reason=DENY_REASON_AGENT_FROZEN,
                 latencyMs=_elapsed_ms(start),
             )
+
+        # MCP server allow-list gate. Default-deny any `mcp__<server>__*`
+        # call whose server isn't approved, before policy evaluation —
+        # mirrors the Node SDK core. `enforce=False` (e.g. solo installs)
+        # disables the gate; older bundles default `enforce=True`.
+        if bundle is not None and bundle.mcpAccess.enforce:
+            parsed = parse_mcp_server(request.tool_name)
+            if parsed is not None and parsed[0] not in bundle.mcpAccess.approvedServers:
+                return EvaluationResult(
+                    decision=DECISION_DENY,
+                    code=RESULT_CODE_MCP_NOT_APPROVED,
+                    reason=deny_reason_mcp_not_approved(parsed[0]),
+                    latencyMs=_elapsed_ms(start),
+                )
 
         # Empty bundle / cold-start is not permissive. Both "haven't
         # pulled yet" (None) and "server says empty" are treated as

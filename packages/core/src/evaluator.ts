@@ -71,8 +71,12 @@ export type EvaluationRequest = Record<string, unknown> & {
 export interface EvaluationResult {
   decision: Decision;
   matchedPolicyId?: string | null;
+  /** Human-readable name of the matched policy (`metadata.name`), for UI/reasons. */
+  matchedPolicyName?: string | null;
   matchedPolicyVersion?: number | null;
   matchedRuleId?: string | null;
+  /** The matched rule's `description`, surfaced as the user-facing explanation. */
+  matchedRuleDescription?: string | null;
   latencyMs: number;
   /**
    * Stable result code on denies that aren't the result of a regular rule
@@ -226,13 +230,17 @@ export class Evaluator {
     // downgrade it; a later `deny` (which returns immediately) still wins.
     let sawAsk = false;
     let askPolicyId: string | null = null;
+    let askPolicyName: string | null = null;
     let askPolicyVersion: number | null = null;
     let askRuleId: string | null = null;
+    let askRuleDescription: string | null = null;
 
     let finalDecision: Decision = DECISION_ALLOW;
     let matchedPolicyId: string | null = null;
+    let matchedPolicyName: string | null = null;
     let matchedPolicyVersion: number | null = null;
     let matchedRuleId: string | null = null;
+    let matchedRuleDescription: string | null = null;
 
     for (const entry of bundle.policies) {
       // Any policy with an uncompileable regex fails closed for every
@@ -270,8 +278,10 @@ export class Evaluator {
           return {
             decision: DECISION_DENY,
             matchedPolicyId: entry.policyId,
+            matchedPolicyName: entry.document.metadata.name,
             matchedPolicyVersion: entry.policyVersion,
             matchedRuleId: rule.id,
+            matchedRuleDescription: rule.description ?? null,
             latencyMs: elapsedMs(start),
           };
         }
@@ -280,16 +290,20 @@ export class Evaluator {
           // Remember and keep scanning so a later deny can still override.
           sawAsk = true;
           askPolicyId = entry.policyId;
+          askPolicyName = entry.document.metadata.name;
           askPolicyVersion = entry.policyVersion;
           askRuleId = rule.id;
+          askRuleDescription = rule.description ?? null;
           continue;
         }
 
         // allow — last-allow-wins among allows.
         finalDecision = DECISION_ALLOW;
         matchedPolicyId = entry.policyId;
+        matchedPolicyName = entry.document.metadata.name;
         matchedPolicyVersion = entry.policyVersion;
         matchedRuleId = rule.id;
+        matchedRuleDescription = rule.description ?? null;
       }
     }
 
@@ -299,8 +313,10 @@ export class Evaluator {
       return {
         decision: DECISION_ASK,
         matchedPolicyId: askPolicyId,
+        matchedPolicyName: askPolicyName,
         matchedPolicyVersion: askPolicyVersion,
         matchedRuleId: askRuleId,
+        matchedRuleDescription: askRuleDescription,
         latencyMs: elapsedMs(start),
       };
     }
@@ -315,8 +331,10 @@ export class Evaluator {
     return {
       decision: finalDecision,
       matchedPolicyId,
+      matchedPolicyName,
       matchedPolicyVersion,
       matchedRuleId,
+      matchedRuleDescription,
       latencyMs: elapsedMs(start),
     };
   }

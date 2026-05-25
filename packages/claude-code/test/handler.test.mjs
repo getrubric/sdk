@@ -68,8 +68,10 @@ test('PreToolUse deny → permissionDecision deny + reason; audit event captures
   const ev = fakeEvaluator({
     decision: 'deny',
     matchedPolicyId: 'pol-1',
+    matchedPolicyName: 'secret-file-access',
     matchedPolicyVersion: 7,
     matchedRuleId: 'block-secrets',
+    matchedRuleDescription: 'This reads or writes a secret file.',
     latencyMs: 0.5,
   });
   const sink = fakeSink();
@@ -83,15 +85,19 @@ test('PreToolUse deny → permissionDecision deny + reason; audit event captures
     { evaluator: ev, audit: sink, agentId: 'agent-X', now: () => FIXED_TS },
   );
   assert.equal(resp.hookSpecificOutput?.permissionDecision, 'deny');
-  assert.ok(resp.hookSpecificOutput?.permissionDecisionReason);
-  assert.match(resp.hookSpecificOutput.permissionDecisionReason, /pol-1.*block-secrets/);
+  const reason = resp.hookSpecificOutput?.permissionDecisionReason;
+  assert.ok(reason);
+  // Reason names the policy and carries the friendly rule description, not raw ids.
+  assert.match(reason, /blocked this action per policy "secret-file-access"/);
+  assert.match(reason, /reads or writes a secret file/);
+  // Audit event still carries the raw ids for the dashboard.
   assert.equal(sink.events[0].decision, 'deny');
   assert.equal(sink.events[0].policyId, 'pol-1');
   assert.equal(sink.events[0].policyVersion, 7);
   assert.equal(sink.events[0].metadata.matchedRuleId, 'block-secrets');
 });
 
-test('PreToolUse frozen-agent deny → uses the kill-switch reason verbatim', () => {
+test('PreToolUse frozen-agent deny → surfaces the kill-switch reason', () => {
   const ev = fakeEvaluator({
     decision: 'deny',
     matchedPolicyId: null,
@@ -111,11 +117,39 @@ test('PreToolUse frozen-agent deny → uses the kill-switch reason verbatim', ()
     },
     { evaluator: ev, audit: sink, agentId: 'agent-X', now: () => FIXED_TS },
   );
-  // The kill-switch reason is surfaced verbatim — operators recognize this
-  // string in their Claude Code terminals, and it's the same wording the
-  // dashboard shows.
-  assert.equal(resp.hookSpecificOutput?.permissionDecisionReason, 'agent frozen by operator');
+  // The kill-switch reason (no matched policy) is surfaced as the
+  // explanation under the Rubric mark — operators recognize this string.
+  assert.match(resp.hookSpecificOutput?.permissionDecisionReason, /agent frozen by operator/);
   assert.equal(sink.events[0].metadata.code, 'AGENT_FROZEN');
+});
+
+test('PreToolUse ask → permissionDecision ask + "requires approval from policy <name>" reason', () => {
+  const ev = fakeEvaluator({
+    decision: 'ask',
+    matchedPolicyId: 'pol-9',
+    matchedPolicyName: 'risky-shell-commands',
+    matchedPolicyVersion: 1,
+    matchedRuleId: 'ask-risky-bash',
+    matchedRuleDescription: 'This command uses sudo.',
+    latencyMs: 0.2,
+  });
+  const sink = fakeSink();
+  const resp = handleHookPayload(
+    {
+      hook_event_name: 'PreToolUse',
+      session_id: 'sess-1',
+      tool_name: 'Bash',
+      tool_input: { command: 'sudo apt-get install foo' },
+    },
+    { evaluator: ev, audit: sink, agentId: 'agent-X', now: () => FIXED_TS },
+  );
+  assert.equal(resp.hookSpecificOutput?.permissionDecision, 'ask');
+  const reason = resp.hookSpecificOutput?.permissionDecisionReason;
+  assert.ok(reason);
+  assert.match(reason, /requires approval from policy "risky-shell-commands"/);
+  assert.match(reason, /This command uses sudo\./);
+  // The Rubric mark is rendered above the headline.
+  assert.match(reason, /R U B R I C/);
 });
 
 test('PostToolUse → continue only, audit event tagged hook=PostToolUse', () => {

@@ -299,7 +299,9 @@ async function handleRequest(
   // The handler runs synchronously — evaluator.evaluate is CPU only,
   // audit.enqueue never blocks. No need to await here.
   const response = handleHookPayload(parsed.data, options.handlerDeps);
-  options.logger.info(
+  // Per-call line is debug-only: at the default level the daemon records
+  // no per-tool-call activity (tool name / decision) to disk.
+  options.logger.debug(
     {
       event: parsed.data.hook_event_name,
       tool: 'tool_name' in parsed.data ? parsed.data.tool_name : undefined,

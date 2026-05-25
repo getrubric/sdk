@@ -12,6 +12,7 @@
 
 import { scrubSecrets, type AuditEvent, type Evaluator } from '@rubric-app/core';
 
+import { rubricMark } from './art.js';
 import { toEvaluationRequest } from './translate.js';
 import {
   HOOK_EVENT_POST_TOOL_USE,
@@ -194,23 +195,41 @@ function assertNever(x: never): never {
 }
 
 /**
- * Human-readable deny reason for the developer to see in their Claude
- * Code terminal. Prefer the policy's explicit reason if present (set
- * by the kill-switch path), otherwise reconstruct a useful sentence.
+ * Human-readable reason shown in the developer's Claude Code terminal on
+ * `ask` (why approval is being requested) and `deny` (why it was blocked).
+ *
+ * Composes the Rubric mark, a one-line headline that names the matched
+ * policy, and a plain-language explanation drawn from the matched rule's
+ * description. For denies with no matched policy (kill-switch, empty
+ * bundle, MCP gate, compile error, timeout) the evaluator's own `reason`
+ * is the explanation.
  */
 function buildDecisionReason(
   decision: 'deny' | 'ask',
   result: {
     reason?: string;
-    matchedPolicyId?: string | null;
-    matchedRuleId?: string | null;
-    code?: string;
+    matchedPolicyName?: string | null;
+    matchedRuleDescription?: string | null;
   },
 ): string {
-  if (result.reason) return result.reason;
-  const policy = result.matchedPolicyId ? `policy ${result.matchedPolicyId}` : 'a policy';
-  const rule = result.matchedRuleId ? ` (rule ${result.matchedRuleId})` : '';
-  return decision === 'ask'
-    ? `Rubric flagged this call for your approval: ${policy}${rule} matched.`
-    : `Rubric denied this call: ${policy}${rule} matched.`;
+  let headline: string;
+  let explanation: string;
+
+  if (result.matchedPolicyName) {
+    headline =
+      decision === 'ask'
+        ? `Rubric requires approval from policy "${result.matchedPolicyName}".`
+        : `Rubric blocked this action per policy "${result.matchedPolicyName}".`;
+    explanation = result.matchedRuleDescription ?? '';
+  } else {
+    headline =
+      decision === 'ask'
+        ? 'Rubric requires your approval to run this.'
+        : 'Rubric blocked this action.';
+    explanation = result.reason ?? '';
+  }
+
+  const lines = [rubricMark(), '', headline];
+  if (explanation) lines.push(explanation);
+  return lines.join('\n');
 }

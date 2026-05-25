@@ -38,9 +38,6 @@ export const PersistedConfigSchema = z
     // daemon can re-enroll on every cold boot (matches Python SDK).
     enrollmentToken: z.string().min(1).optional(),
     daemonPort: z.number().int().min(1).max(65535).optional(),
-    // Anonymous, counts-only telemetry. Defaults on; set false here or
-    // RUBRIC_TELEMETRY=0 to opt out.
-    telemetry: z.boolean().optional(),
   })
   .refine(
     (c) =>

@@ -25,13 +25,14 @@ const POLICY_IDS = {
 const DESTRUCTIVE_SHELL: PolicyDocument = {
   apiVersion: API_VERSION,
   kind: KIND,
-  metadata: { name: 'block-destructive-shell' },
+  metadata: { name: 'destructive-shell-commands' },
   spec: {
     defaultEffect: 'allow',
     rules: [
       {
         id: 'deny-destructive-bash',
-        description: 'Recursive deletes of root/home, SQL drops, force-push, reformat/overwrite, pipe-to-shell, forkbomb, chmod 777 /.',
+        description:
+          'This command can irreversibly destroy files, data, or repo history — for example deleting your home or root directory, dropping a database table, force-pushing, reformatting a disk, or piping a download straight into a shell.',
         effect: 'deny',
         conditions: [
           { field: 'tool_name', operator: 'eq', value: 'Bash' },
@@ -51,13 +52,14 @@ const DESTRUCTIVE_SHELL: PolicyDocument = {
 const SECRET_FILES: PolicyDocument = {
   apiVersion: API_VERSION,
   kind: KIND,
-  metadata: { name: 'block-secret-files' },
+  metadata: { name: 'secret-file-access' },
   spec: {
     defaultEffect: 'allow',
     rules: [
       {
         id: 'deny-secret-file-access',
-        description: 'Claude Code file-IO tools targeting dotenv files, PEM/SSH keys, cloud-credential paths, or kubeconfig.',
+        description:
+          'This reads or writes a file that usually holds secrets — a .env file, an SSH or PEM private key, cloud credentials, or a kubeconfig. Approving it could expose those secrets.',
         effect: 'deny',
         conditions: [
           { field: 'tool_name', operator: 'in', value: ['Read', 'Edit', 'Write', 'MultiEdit'] },
@@ -76,13 +78,14 @@ const SECRET_FILES: PolicyDocument = {
 const WEBFETCH_INTERNAL: PolicyDocument = {
   apiVersion: API_VERSION,
   kind: KIND,
-  metadata: { name: 'block-internal-webfetch' },
+  metadata: { name: 'internal-network-requests' },
   spec: {
     defaultEffect: 'allow',
     rules: [
       {
         id: 'deny-webfetch-metadata-service',
-        description: 'Cloud instance-metadata endpoints — almost always an SSRF probe.',
+        description:
+          'This fetches a cloud instance-metadata address (like 169.254.169.254), which is the classic way credentials get stolen via SSRF.',
         effect: 'deny',
         conditions: [
           { field: 'tool_name', operator: 'in', value: ['WebFetch', 'WebSearch'] },
@@ -95,7 +98,8 @@ const WEBFETCH_INTERNAL: PolicyDocument = {
       },
       {
         id: 'deny-webfetch-loopback-and-private',
-        description: 'Loopback + RFC1918 + link-local targets.',
+        description:
+          'This fetches a private or loopback network address (localhost, 10.x, 192.168.x, and similar) rather than a public website — often unintended, sometimes an SSRF attempt.',
         effect: 'deny',
         conditions: [
           { field: 'tool_name', operator: 'in', value: ['WebFetch', 'WebSearch'] },
@@ -114,13 +118,14 @@ const WEBFETCH_INTERNAL: PolicyDocument = {
 const CONFIRM_RISKY_SHELL: PolicyDocument = {
   apiVersion: API_VERSION,
   kind: KIND,
-  metadata: { name: 'confirm-risky-shell' },
+  metadata: { name: 'risky-shell-commands' },
   spec: {
     defaultEffect: 'allow',
     rules: [
       {
         id: 'ask-risky-bash',
-        description: 'Prompt before sudo, recursive deletes, pushes to protected branches, or writes under /etc.',
+        description:
+          'This command can affect your system or shared state — it uses sudo, deletes files recursively, pushes to a protected branch (main/master/production), or writes under /etc.',
         effect: 'ask',
         conditions: [
           { field: 'tool_name', operator: 'eq', value: 'Bash' },

@@ -1,6 +1,6 @@
 {
   "name": "@rubric-app/claude-code",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Rubric Claude Code adapter — long-lived loopback daemon + `rubric` CLI that routes every Claude Code tool call through the Rubric policy engine and audit log.",
   "license": "MIT",
   "homepage": "https://rubric-app.com",

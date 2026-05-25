@@ -30,10 +30,9 @@ import {
   removePortFile,
   writePortFile,
 } from './lifecycle.js';
-import { LocalAuditSink } from './local-audit.js';
 import { createLogger, type Logger } from './logger.js';
+import { NoopAuditSink } from './noop-audit.js';
 import { startServer, type RunningServer } from './server.js';
-import { Telemetry, loadOrCreateInstallId, telemetryEnabled } from './telemetry.js';
 
 const DEFAULT_FIRST_PULL_TIMEOUT_MS = 10_000;
 
@@ -53,8 +52,6 @@ export interface DaemonConfig {
   enrollmentToken?: string;
   /** Requested daemon port. Falls back to OS-assigned if in use. */
   daemonPort?: number;
-  /** Anonymous telemetry opt-out (false = off). Defaults on. */
-  telemetry?: boolean;
 }
 
 export interface RunDaemonOptions {
@@ -380,14 +377,9 @@ async function runSolo(
   evaluator.updateBundle(compileLocalBundle(pack));
   logger.info({ policies: pack.length, source: options.paths.policiesFile }, 'solo policy pack loaded');
 
-  const telemetry = new Telemetry({
-    installId: loadOrCreateInstallId(options.paths.telemetryIdFile),
-    enabled: telemetryEnabled(options.config.telemetry),
-  });
-  telemetry.emit('daemon_start', { mode: 'solo' });
-
   const agentId = `solo:${options.config.agentName}`;
-  const audit = new LocalAuditSink(logger, telemetry);
+  // Solo records nothing: no local decision log, no telemetry.
+  const audit = new NoopAuditSink();
 
   let shutdownTrigger: (() => Promise<void>) | null = null;
   let server: RunningServer;

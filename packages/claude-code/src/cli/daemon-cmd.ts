@@ -37,7 +37,6 @@ export async function runDaemonCmd(options: DaemonCmdOptions = {}): Promise<void
       agentName: config.agentName,
       ...(config.enrollmentToken !== undefined ? { enrollmentToken: config.enrollmentToken } : {}),
       ...(config.daemonPort !== undefined ? { daemonPort: config.daemonPort } : {}),
-      ...(config.telemetry !== undefined ? { telemetry: config.telemetry } : {}),
     },
     paths,
     ...(options.logLevel ? { logLevel: options.logLevel } : {}),

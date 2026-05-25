@@ -27,12 +27,6 @@ import { installService, kickstartService } from '../config/services/index.js';
 import { applyRubricHooks } from '../config/settings-json.js';
 import { writeEnsureDaemonScript } from '../config/ensure-daemon-script.js';
 import { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT } from '../daemon/server.js';
-import {
-  TELEMETRY_NOTICE,
-  Telemetry,
-  loadOrCreateInstallId,
-  telemetryEnabled,
-} from '../daemon/telemetry.js';
 import { DEFAULT_SAFETY_PACK } from '../policies/default-pack.js';
 
 import {
@@ -158,18 +152,11 @@ async function runSoloInit(paths: Paths, options: InitOptions): Promise<void> {
 
   await finishInstall(paths, options);
 
-  // Anonymous, counts-only install ping (opt-out honored). Best-effort.
-  new Telemetry({
-    installId: loadOrCreateInstallId(paths.telemetryIdFile),
-    enabled: telemetryEnabled(),
-  }).emit('install', { mode: 'solo' });
-
   if (!options.noStart) {
     process.stdout.write(
       `\n${ok('Rubric is guarding Claude Code.')} Dangerous actions (destructive shell, secret files, internal fetches) are blocked; everything else runs free.\n` +
-        `  ${dim('Nothing leaves your machine.')} Edit ${dim(paths.policiesFile)} to tune the rules.\n` +
-        `  Run ${dim('rubric login')} anytime to sync, audit, and share with your team.\n` +
-        `  ${dim(TELEMETRY_NOTICE)}\n`,
+        `  ${dim('Nothing leaves your machine — Rubric records nothing.')} Edit ${dim(paths.policiesFile)} to tune the rules.\n` +
+        `  Run ${dim('rubric login')} anytime to sync, audit, and share with your team.\n`,
     );
   }
 }

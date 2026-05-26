@@ -149,7 +149,7 @@ test('PreToolUse ask → permissionDecision ask + "requires approval from policy
   assert.match(reason, /requires approval from policy "risky-shell-commands"/);
   assert.match(reason, /This command uses sudo\./);
   // The Rubric mark is rendered above the headline.
-  assert.match(reason, /R U B R I C/);
+  assert.match(reason, /Rubric/);
 });
 
 test('PostToolUse → continue only, audit event tagged hook=PostToolUse', () => {

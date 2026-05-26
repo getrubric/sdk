@@ -67,15 +67,19 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
   }
 
   const choice = await chooseMode(options);
-  if (choice === 'create') {
-    printCreateAccountBridge();
-    return;
-  }
   if (choice === 'solo') {
     await runSoloInit(paths, options);
-  } else {
-    await runConnectedInit(paths, options);
+    return;
   }
+  // Both 'create' (new personal workspace) and 'connected' (join an existing
+  // team workspace) end at the same connected enrollment over the existing
+  // enrollment-token flow. They differ only in intro: 'create' opens sign-up
+  // first to mint a workspace + token, then continues straight into enrollment
+  // in the same session.
+  if (choice === 'create') {
+    openSignupForAccount();
+  }
+  await runConnectedInit(paths, options);
 }
 
 /**
@@ -105,19 +109,19 @@ async function chooseMode(options: InitOptions): Promise<'solo' | 'connected' | 
       message: 'How do you want to run Rubric?',
       choices: [
         {
-          title: 'Just protect me — no account (recommended)',
-          description: 'Local guardrails. Nothing leaves your machine.',
-          value: 'solo',
-        },
-        {
-          title: 'Create a Rubric account',
-          description: 'Sync, history, and share guardrails with your team.',
+          title: 'Create a Rubric account (recommended)',
+          description: 'Your own cloud workspace — audit history, analytics, synced guardrails.',
           value: 'create',
         },
         {
           title: 'Join my team’s workspace',
-          description: 'Enroll with a token from your org’s dashboard.',
+          description: 'Connect to your organization’s existing Rubric workspace.',
           value: 'connected',
+        },
+        {
+          title: 'Just protect this machine — no account',
+          description: 'Local guardrails only. Nothing leaves your machine.',
+          value: 'solo',
         },
       ],
       initial: 0,
@@ -278,16 +282,29 @@ async function finishInstall(paths: Paths, options: InitOptions): Promise<void> 
   }
 }
 
-function printCreateAccountBridge(): void {
-  // The seamless `rubric login` browser handshake isn't built yet; bridge
-  // through web signup + the enrollment-token path so the picker option works.
+function openSignupForAccount(): void {
+  // The seamless `rubric login` browser handshake isn't built; bridge through
+  // web sign-up over the existing enrollment-token path. Open the browser, then
+  // fall straight into the enrollment-token prompt (runConnectedInit) so the
+  // whole thing completes in one session rather than re-running with a flag.
   const signupUrl = 'https://app.rubric-app.com/sign-up';
+  tryOpenBrowser(signupUrl);
   process.stdout.write(
-    `${info('Create your Rubric workspace in the browser:')} ${dim(signupUrl)}\n` +
-      `  Then grab an enrollment token from the dashboard and run:\n` +
-      `  ${dim('rubric init --enrollment-token <token>')}\n` +
-      `  (Seamless one-step ${dim('rubric login')} is coming soon.)\n`,
+    `${info('Create your personal Rubric workspace:')} ${dim(signupUrl)}\n` +
+      `  (opening your browser…)  Once you're in, copy your enrollment token from\n` +
+      `  ${dim('Settings → Agents → New enrollment token')} and paste it below.\n\n`,
   );
+}
+
+/** Best-effort: open a URL in the user's default browser. Never throws. */
+function tryOpenBrowser(url: string): void {
+  const cmd =
+    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  try {
+    spawn(cmd, [url], { stdio: 'ignore', detached: true }).unref();
+  } catch {
+    /* best effort — the URL is printed above regardless */
+  }
 }
 
 // ---- Helpers ---------------------------------------------------------------

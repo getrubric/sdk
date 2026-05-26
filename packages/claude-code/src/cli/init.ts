@@ -160,7 +160,8 @@ async function runSoloInit(paths: Paths, options: InitOptions): Promise<void> {
     process.stdout.write(
       `\n${ok('Rubric is guarding Claude Code.')} Dangerous actions (destructive shell, secret files, internal fetches) are blocked; everything else runs free.\n` +
         `  ${dim('Nothing leaves your machine — Rubric records nothing.')} Edit ${dim(paths.policiesFile)} to tune the rules.\n` +
-        `  Run ${dim('rubric login')} anytime to sync, audit, and share with your team.\n`,
+        `  Run ${dim('rubric login')} anytime to sync, audit, and share with your team.\n` +
+        manageTip(),
     );
   }
 }
@@ -208,8 +209,23 @@ async function runConnectedInit(paths: Paths, options: InitOptions): Promise<voi
   await finishInstall(paths, options);
 
   if (!options.noStart) {
-    process.stdout.write(`\n${info('next:')} ${dim('rubric doctor')}  to confirm everything is wired up\n`);
+    process.stdout.write(
+      `\n${info('next:')} ${dim('rubric doctor')}  to confirm everything is wired up\n` + manageTip(),
+    );
   }
+}
+
+/**
+ * Tip shown after install: the `rubric` management command (doctor, status,
+ * logs, uninstall) is only on PATH after a global install. `npx` runs the
+ * package transiently and leaves no `rubric` binary, so point users at the
+ * global install if they used it.
+ */
+function manageTip(): string {
+  return (
+    `  ${dim('Note:')} the ${dim('rubric')} command (doctor, status, logs, uninstall) needs a global install — ` +
+    `if you used ${dim('npx')}, run ${dim('npm i -g @rubric-app/claude-code')}.\n`
+  );
 }
 
 /**

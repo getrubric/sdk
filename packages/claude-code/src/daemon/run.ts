@@ -140,17 +140,33 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
       ),
   });
 
+  // Seed the built-in baseline pack immediately so the daemon never serves an
+  // empty (deny-all) policy set. Cold start, an org with no policies scoped to
+  // this agent, or a transient pull failure all fall back to the same safety
+  // pack solo ships — permissive (allow + deny-catastrophic + ask-risky) —
+  // rather than locking the developer out. A real, non-empty org bundle
+  // replaces it on first pull.
+  const baselineBundle = compileLocalBundle();
+  evaluator.updateBundle(baselineBundle);
+
   const bundlePoller = new BundlePoller({
     apiUrl,
     tokenStore,
     onUpdate: (bundle) => {
-      evaluator.updateBundle(bundle);
+      // An empty org bundle (no policies scoped to this agent) would make the
+      // evaluator deny-all; fall back to the baseline instead. NEVER override a
+      // frozen kill-switch bundle (empty policies + this agent in
+      // frozenAgentIds) — that must still deny every call.
+      const usingBaseline =
+        bundle.policies.length === 0 && bundle.frozenAgentIds.length === 0;
+      evaluator.updateBundle(usingBaseline ? baselineBundle : bundle);
       logger.info(
         {
           bundleVersion: bundle.bundleVersion,
           contentHash: bundle.contentHash.slice(0, 12),
           policies: bundle.policies.length,
           frozenAgentIds: bundle.frozenAgentIds.length,
+          usingBaseline,
         },
         'bundle updated',
       );
@@ -159,48 +175,25 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   });
   bundlePoller.start();
 
-  // Refuse to bind `/v1/hook` until the first bundle pull has produced
-  // an authoritative bundle. `firstPullDone` resolves on success OR
-  // failure of the first poll; afterwards `current` is null iff the
-  // pull failed (network error, 401 → IdentityRevoked, 5xx, schema
-  // validation failure). Serving with no bundle would fail-open to an
-  // empty policy set, so we fail-closed instead.
-  //
-  // The `--allow-cold-start` escape hatch exists for local dev and
-  // tests against an offline Rubric API; production callers MUST NOT
-  // set it.
+  // We seed the baseline pack above, so the daemon always has a safe,
+  // permissive policy set to serve and never fails closed (deny-all) or refuses
+  // to start. Try to pull the authoritative org bundle promptly; if the first
+  // pull fails or times out, keep serving the baseline and let the poller's
+  // never-die loop catch up. (This replaces the old fail-closed cold-start
+  // behavior — a developer enrolling before any policy exists is no longer
+  // locked out.)
   try {
     await bundlePoller.firstPullDone(
       options.firstBundleTimeoutMs ?? DEFAULT_FIRST_PULL_TIMEOUT_MS,
     );
   } catch (err: unknown) {
-    if (!options.allowColdStart) {
-      logger.fatal({ err }, 'first-pull timeout; refusing to serve without an authoritative bundle');
-      await drainAndLog(
-        logger,
-        'startup-cleanup',
-        Promise.allSettled([bundlePoller.stop(), tokenStore.stop()]),
-      );
-      pidGuard.release();
-      throw err instanceof Error
-        ? err
-        : new GovernanceError('first-pull timeout; bundle never arrived');
-    }
-    logger.warn({ err }, 'cold-start allowed; first-pull timed out, serving with empty policy set');
+    logger.warn(
+      { err },
+      'first bundle pull failed/timed out; serving built-in baseline until the org bundle arrives',
+    );
   }
-  if (bundlePoller.current === null && !options.allowColdStart) {
-    logger.fatal(
-      'first-pull completed but no bundle is loaded; refusing to serve without an authoritative bundle',
-    );
-    await drainAndLog(
-      logger,
-      'startup-cleanup',
-      Promise.allSettled([bundlePoller.stop(), tokenStore.stop()]),
-    );
-    pidGuard.release();
-    throw new GovernanceError(
-      'daemon refusing to start: first bundle pull failed and --allow-cold-start was not set',
-    );
+  if (bundlePoller.current === null) {
+    logger.warn('no org bundle yet; serving built-in baseline pack');
   }
 
   const auditSink = new AuditSink({

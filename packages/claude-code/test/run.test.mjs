@@ -1,6 +1,7 @@
 // `runDaemon` integration tests. Boots a mock Rubric API on 127.0.0.1
-// and verifies the cold-start fail-closed contract and the
-// component-cleanup logging during startup.
+// and verifies the cold-start fall-back-to-baseline contract (a failed/empty
+// first bundle pull serves the built-in baseline rather than locking out) and
+// that enrollment / token failures still refuse to start.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -84,7 +85,35 @@ function bundle500(_req, res) {
   res.end(JSON.stringify({ error: 'mock_bundle_failure' }));
 }
 
-test('runDaemon refuses to start when first bundle pull fails', async () => {
+async function waitForPortFile(portFile, budgetMs) {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    try {
+      const n = Number(fs.readFileSync(portFile, 'utf8').trim());
+      if (Number.isInteger(n) && n > 0) return n;
+    } catch {
+      /* not bound yet */
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return null;
+}
+
+async function postHook(port, toolName, input) {
+  const res = await fetch(`http://127.0.0.1:${port}/v1/hook`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      session_id: 's',
+      hook_event_name: 'PreToolUse',
+      tool_name: toolName,
+      tool_input: input,
+    }),
+  });
+  return res.json();
+}
+
+test('runDaemon serves the baseline pack when the first bundle pull fails (no cold-start lockout)', async () => {
   await withMockApi(
     {
       'POST /v1/identities/enroll': enrollOk,
@@ -92,21 +121,34 @@ test('runDaemon refuses to start when first bundle pull fails', async () => {
     },
     async (apiUrl) => {
       const paths = makePaths();
-      await assert.rejects(
-        () =>
-          runDaemon({
-            config: {
-              apiUrl,
-              agentName: 'test-agent',
-              enrollmentToken: 'enr_test',
-            },
-            paths,
-            logLevel: 'fatal',
-            firstBundleTimeoutMs: 2_000,
-          }),
-        /refusing to start|refusing to serve|first-pull/i,
-      );
-      // No port file written → server never bound.
+      const daemonPromise = runDaemon({
+        config: { apiUrl, agentName: 'test-agent', enrollmentToken: 'enr_test' },
+        paths,
+        logLevel: 'fatal',
+        firstBundleTimeoutMs: 1_000,
+      });
+      let port;
+      try {
+        // Despite the bundle pull failing, the daemon binds and serves the
+        // built-in baseline rather than refusing to start.
+        port = await waitForPortFile(paths.daemonPortFile, 6_000);
+        assert.ok(port, 'daemon should bind and serve despite the bundle pull failing');
+        // Baseline is permissive: benign allowed, catastrophic denied.
+        const allow = await postHook(port, 'Bash', { command: 'ls -la' });
+        assert.equal(allow.hookSpecificOutput?.permissionDecision, 'allow');
+        const deny = await postHook(port, 'Bash', { command: 'rm -rf /' });
+        assert.equal(deny.hookSpecificOutput?.permissionDecision, 'deny');
+      } finally {
+        // Graceful shutdown via the authenticated endpoint — avoids SIGTERM,
+        // whose handler calls process.exit(0) and would kill the test runner.
+        if (port) {
+          await fetch(`http://127.0.0.1:${port}/v1/shutdown`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${TOKEN}` },
+          }).catch(() => {});
+        }
+        await daemonPromise;
+      }
       assert.equal(fs.existsSync(paths.daemonPortFile), false);
     },
   );

@@ -152,6 +152,76 @@ test('PreToolUse ask → permissionDecision ask + "requires approval from policy
   assert.match(reason, /Rubric/);
 });
 
+test('seatbelt: destructive git on allow → snapshot spy called with command + cwd', () => {
+  const ev = fakeEvaluator({ decision: 'allow', matchedPolicyId: null, matchedPolicyVersion: null, matchedRuleId: null, latencyMs: 0.3 });
+  const calls = [];
+  handleHookPayload(
+    {
+      hook_event_name: 'PreToolUse',
+      session_id: 'sess-9',
+      cwd: '/work/proj',
+      tool_name: 'Bash',
+      tool_input: { command: 'git reset --hard HEAD~1' },
+    },
+    { evaluator: ev, audit: fakeSink(), agentId: 'agent-X', now: () => FIXED_TS, snapshot: (a) => calls.push(a) },
+  );
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], { cwd: '/work/proj', command: 'git reset --hard HEAD~1', sessionId: 'sess-9' });
+});
+
+test('seatbelt: non-destructive Bash does not trigger a snapshot', () => {
+  const ev = fakeEvaluator({ decision: 'allow', matchedPolicyId: null, matchedPolicyVersion: null, matchedRuleId: null, latencyMs: 0.3 });
+  const calls = [];
+  handleHookPayload(
+    { hook_event_name: 'PreToolUse', session_id: 'sess-9', cwd: '/work/proj', tool_name: 'Bash', tool_input: { command: 'git status' } },
+    { evaluator: ev, audit: fakeSink(), agentId: 'agent-X', snapshot: (a) => calls.push(a) },
+  );
+  assert.equal(calls.length, 0);
+});
+
+test('seatbelt: deny on destructive git does not snapshot (command never runs)', () => {
+  const ev = fakeEvaluator({ decision: 'deny', matchedPolicyId: 'p', matchedPolicyVersion: 1, matchedRuleId: 'r', latencyMs: 0.3 });
+  const calls = [];
+  handleHookPayload(
+    { hook_event_name: 'PreToolUse', session_id: 'sess-9', cwd: '/work/proj', tool_name: 'Bash', tool_input: { command: 'git reset --hard HEAD~1' } },
+    { evaluator: ev, audit: fakeSink(), agentId: 'agent-X', snapshot: (a) => calls.push(a) },
+  );
+  assert.equal(calls.length, 0);
+});
+
+test('seatbelt: a throwing snapshot never breaks the decision path', () => {
+  const ev = fakeEvaluator({ decision: 'allow', matchedPolicyId: null, matchedPolicyVersion: null, matchedRuleId: null, latencyMs: 0.3 });
+  const resp = handleHookPayload(
+    { hook_event_name: 'PreToolUse', session_id: 'sess-9', cwd: '/work/proj', tool_name: 'Bash', tool_input: { command: 'git clean -fd' } },
+    { evaluator: ev, audit: fakeSink(), agentId: 'agent-X', snapshot: () => { throw new Error('boom'); } },
+  );
+  assert.equal(resp.continue, true);
+  assert.equal(resp.hookSpecificOutput?.permissionDecision, 'allow');
+});
+
+test('seatbelt: PostToolUse nudges the user when a snapshot was just taken', () => {
+  const resp = handleHookPayload(
+    { hook_event_name: 'PostToolUse', session_id: 'sess-9', tool_name: 'Bash', tool_input: { command: 'git reset --hard HEAD~1' } },
+    {
+      evaluator: fakeEvaluator(null),
+      audit: fakeSink(),
+      agentId: 'agent-X',
+      wasJustSnapshotted: (sid, cmd) => sid === 'sess-9' && cmd === 'git reset --hard HEAD~1',
+    },
+  );
+  assert.equal(resp.continue, true);
+  assert.match(resp.systemMessage ?? '', /rubric undo/);
+});
+
+test('seatbelt: PostToolUse stays quiet when nothing was snapshotted', () => {
+  const resp = handleHookPayload(
+    { hook_event_name: 'PostToolUse', session_id: 'sess-9', tool_name: 'Bash', tool_input: { command: 'git status' } },
+    { evaluator: fakeEvaluator(null), audit: fakeSink(), agentId: 'agent-X', wasJustSnapshotted: () => false },
+  );
+  assert.equal(resp.continue, true);
+  assert.equal(resp.systemMessage, undefined);
+});
+
 test('PostToolUse → continue only, audit event tagged hook=PostToolUse', () => {
   const ev = fakeEvaluator(null /* never called */);
   const sink = fakeSink();

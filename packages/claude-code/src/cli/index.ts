@@ -45,6 +45,23 @@ program
   });
 
 program
+  .command('login')
+  .description('Connect this machine to a Rubric workspace via the browser (one-step).')
+  .option('--api-url <url>', 'Rubric API base URL (skip prompt)')
+  .option('--agent-name <name>', 'agent name in the dashboard (skip prompt)')
+  .option('--no-start', 'do not spawn the daemon at the end of login')
+  .option('--no-settings-patch', 'do not patch ~/.claude/settings.json')
+  .action(async (opts) => {
+    const { runLogin } = await import('./login.js');
+    await runLogin({
+      ...(opts.apiUrl ? { apiUrl: opts.apiUrl } : {}),
+      ...(opts.agentName ? { agentName: opts.agentName } : {}),
+      noStart: opts.start === false,
+      noSettingsPatch: opts.settingsPatch === false,
+    });
+  });
+
+program
   .command('doctor')
   .description('Run sanity checks against the local install.')
   .action(async () => {
@@ -83,6 +100,19 @@ program
   });
 
 program
+  .command('undo')
+  .description('Restore the working tree from a seatbelt snapshot taken before a destructive git command.')
+  .option('--list', 'list available snapshots instead of restoring')
+  .option('--to <sha>', 'restore a specific snapshot (full or short sha from --list)')
+  .action(async (opts) => {
+    const { runUndo } = await import('./undo.js');
+    await runUndo({
+      list: Boolean(opts.list),
+      ...(opts.to ? { to: opts.to } : {}),
+    });
+  });
+
+program
   .command('logs')
   .description('Pretty-print the daemon log with optional filters.')
   .option('--decision <kind>', 'show only PreToolUse decisions of this kind (allow | deny | ask)')
@@ -92,6 +122,17 @@ program
   .action(async (opts) => {
     const { runLogs } = await import('./logs.js');
     await runLogs(opts);
+  });
+
+const mcp = program.command('mcp').description('Manage this agent’s MCP server access.');
+mcp
+  .command('request')
+  .argument('<server>', 'MCP server name (the `<server>` in mcp__<server>__tool)')
+  .requiredOption('--reason <reason>', 'why this agent needs access (recorded for the approver)')
+  .description('Request admin approval for this agent to use an MCP server.')
+  .action(async (server: string, opts: { reason?: string }) => {
+    const { runMcpRequest } = await import('./mcp.js');
+    await runMcpRequest(server, opts);
   });
 
 // `rubric daemon` is hidden from --help: it's invoked by `rubric init`

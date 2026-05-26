@@ -2,6 +2,17 @@
 
 All notable changes to `@rubric-app/core` and `@rubric-app/claude-code` are recorded here.
 
+## 0.3.0 — 2026-05-25
+
+Consolidates features that had been developed in the platform monorepo into this
+(now sole) SDK source of truth.
+
+### Added
+
+- **Git seatbelt + `rubric undo`** (`@rubric-app/claude-code`): the daemon now snapshots your working tree into a hidden per-project shadow git repo *before* a destructive git command runs (`reset --hard`, `clean -fd`, `checkout -- .`, `restore`, `stash drop/clear`, `rebase`, `branch -D`) — closing the gap Claude Code's own `/rewind` leaves for bash-driven changes. `rubric undo` restores the tree (`--list` to see snapshots, `--to <sha>` to pick one); each snapshot is labeled with the user prompt the agent was acting on. After a snapshotted command, Claude Code surfaces a one-line nudge telling you `rubric undo` is available. Purely local — the shadow repo never leaves the machine, so it's on even in solo's record-nothing mode. Opt out with `RUBRIC_SEATBELT=0` or `"seatbelt": false` in `config.json`.
+- **`rubric login`** (`@rubric-app/claude-code`): one-step browser device-authorization (RFC 8628) connect. `rubric init`'s "create account" / "join workspace" choices now run this handshake instead of the manual sign-up + token-paste bridge — it mints (or joins) a workspace and connects in the same session, auto-publishing your local safety pack into a freshly created workspace so its bundle is never empty.
+- **MCP discovery + access requests** (`@rubric-app/claude-code`): at SessionStart (connected mode) the daemon discovers configured MCP servers from `.mcp.json` / `~/.claude.json` and reports them so they appear in the Rubric catalog before any of their tools are called. `rubric mcp request <server> --reason "…"` asks an admin to approve this agent's access. Complements the existing bundle-driven MCP enforcement.
+
 ## 0.1.4 — 2026-05-20
 
 ### Fixed

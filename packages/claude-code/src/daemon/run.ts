@@ -20,8 +20,10 @@ import {
   type TokenStore,
 } from '@rubric-app/core';
 
+import { seatbeltEnabled } from '../cli/_config.js';
 import type { Paths } from '../config/paths.js';
 import { DEFAULT_SAFETY_PACK, compileLocalBundle } from '../policies/default-pack.js';
+import { resolveProjectRoot, snapshot as shadowSnapshot } from '../seatbelt/shadow.js';
 
 
 import {
@@ -31,6 +33,7 @@ import {
   writePortFile,
 } from './lifecycle.js';
 import { createLogger, type Logger } from './logger.js';
+import { discoverMcpServers } from './mcp-config.js';
 import { NoopAuditSink } from './noop-audit.js';
 import { startServer, type RunningServer } from './server.js';
 
@@ -52,6 +55,8 @@ export interface DaemonConfig {
   enrollmentToken?: string;
   /** Requested daemon port. Falls back to OS-assigned if in use. */
   daemonPort?: number;
+  /** Git seatbelt opt-out (false = off). Defaults on. */
+  seatbelt?: boolean;
 }
 
 export interface RunDaemonOptions {
@@ -246,6 +251,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   // ---- Bind the HTTP server -----------------------------------------------
 
   const startedAt = new Date();
+  const seatbelt = makeSeatbelt(options.paths, logger, options.config.seatbelt);
 
   // The shutdown trigger handed to the server. We set this up *before*
   // startServer so the `POST /v1/shutdown` endpoint can resolve it
@@ -264,6 +270,10 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
         evaluator,
         audit: auditSink,
         agentId: tokenStore.agentId,
+        discoverMcpServers,
+        ...(seatbelt
+          ? { snapshot: seatbelt.snapshot, wasJustSnapshotted: seatbelt.wasJustSnapshotted }
+          : {}),
       },
       statusDeps: {
         bundlePoller,
@@ -373,6 +383,9 @@ async function runSolo(
   const agentId = `solo:${options.config.agentName}`;
   // Solo records nothing: no local decision log, no telemetry.
   const audit = new NoopAuditSink();
+  // The seatbelt is local-only (a hidden shadow git repo for `rubric undo`),
+  // not a decision log, so it's compatible with solo's record-nothing stance.
+  const seatbelt = makeSeatbelt(options.paths, logger, options.config.seatbelt);
 
   let shutdownTrigger: (() => Promise<void>) | null = null;
   let server: RunningServer;
@@ -381,7 +394,14 @@ async function runSolo(
       ...(options.config.daemonPort !== undefined ? { port: options.config.daemonPort } : {}),
       daemonToken,
       logger,
-      handlerDeps: { evaluator, audit, agentId },
+      handlerDeps: {
+        evaluator,
+        audit,
+        agentId,
+        ...(seatbelt
+          ? { snapshot: seatbelt.snapshot, wasJustSnapshotted: seatbelt.wasJustSnapshotted }
+          : {}),
+      },
       onShutdownRequest: async () => {
         if (shutdownTrigger === null) return;
         await shutdownTrigger();
@@ -451,6 +471,64 @@ function loadLocalPack(
     logger.warn({ err, policiesFile }, 'local policy file invalid; using baked-in default pack');
     return DEFAULT_SAFETY_PACK;
   }
+}
+
+// ---- Seatbelt ---------------------------------------------------------------
+
+interface Seatbelt {
+  snapshot: (args: { cwd: string; command: string; sessionId: string; transcriptPath?: string }) => void;
+  wasJustSnapshotted: (sessionId: string, command: string) => boolean;
+}
+
+// A nudge is only worth showing right after the command runs; a successful
+// snapshot is "fresh" for this long so PostToolUse can confirm one happened.
+const SNAPSHOT_FRESH_MS = 120_000;
+
+/**
+ * Build the seatbelt handed to the handler, or `undefined` when the seatbelt
+ * is disabled (so the handler skips the work entirely). `snapshot` resolves
+ * the project root from the tool's cwd and snapshots into the per-project
+ * shadow repo (best-effort, never throwing); `wasJustSnapshotted` lets the
+ * PostToolUse path confirm a snapshot really happened before nudging the user.
+ *
+ * Local-only: the shadow repo lives under the config dir and nothing leaves
+ * the machine, so this is enabled even in solo's record-nothing mode.
+ */
+function makeSeatbelt(
+  paths: Paths,
+  logger: Logger,
+  configFlag: boolean | undefined,
+): Seatbelt | undefined {
+  if (!seatbeltEnabled(configFlag)) return undefined;
+  // Last successful snapshot per session — small, bounded by active sessions.
+  const recent = new Map<string, { command: string; at: number }>();
+  return {
+    snapshot: ({ cwd, command, sessionId, transcriptPath }) => {
+      const projectRoot = resolveProjectRoot(cwd);
+      if (projectRoot === null) return; // not inside a git repo — nothing to snapshot
+      const made = shadowSnapshot({
+        paths,
+        projectRoot,
+        command,
+        sessionId,
+        ...(transcriptPath ? { transcriptPath } : {}),
+        onWarn: (message) => logger.warn(message),
+      });
+      if (made) {
+        recent.set(sessionId, { command, at: Date.now() });
+        logger.info({ projectRoot, command }, 'seatbelt snapshot taken before destructive git');
+      }
+    },
+    wasJustSnapshotted: (sessionId, command) => {
+      const entry = recent.get(sessionId);
+      if (!entry) return false;
+      if (Date.now() - entry.at > SNAPSHOT_FRESH_MS) {
+        recent.delete(sessionId);
+        return false;
+      }
+      return entry.command === command;
+    },
+  };
 }
 
 // ---- Helpers ---------------------------------------------------------------

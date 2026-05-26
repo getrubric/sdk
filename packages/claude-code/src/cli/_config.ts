@@ -38,6 +38,11 @@ export const PersistedConfigSchema = z
     // daemon can re-enroll on every cold boot (matches Python SDK).
     enrollmentToken: z.string().min(1).optional(),
     daemonPort: z.number().int().min(1).max(65535).optional(),
+    // Git seatbelt: snapshot the working tree before destructive git
+    // commands so `rubric undo` can restore it. Defaults on; set false here
+    // or RUBRIC_SEATBELT=0 to opt out. Purely local — nothing is recorded or
+    // uploaded (consistent with solo's record-nothing stance).
+    seatbelt: z.boolean().optional(),
   })
   .refine(
     (c) =>
@@ -85,6 +90,17 @@ export function writeConfig(configFile: string, value: PersistedConfig): void {
     mode: 0o600,
     atomic: true,
   });
+}
+
+/**
+ * Git seatbelt is on unless `RUBRIC_SEATBELT=0` or the config flag is false.
+ * The seatbelt's snapshots are local-only (a hidden shadow git repo) and
+ * never uploaded, so it stays on even in solo's record-nothing mode.
+ */
+export function seatbeltEnabled(configFlag?: boolean): boolean {
+  if (process.env['RUBRIC_SEATBELT'] === '0') return false;
+  if (configFlag === false) return false;
+  return true;
 }
 
 export function configExists(configFile: string): boolean {

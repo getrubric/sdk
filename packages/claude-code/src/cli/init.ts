@@ -71,15 +71,22 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
     await runSoloInit(paths, options);
     return;
   }
-  // Both 'create' (new personal workspace) and 'connected' (join an existing
-  // team workspace) end at the same connected enrollment over the existing
-  // enrollment-token flow. They differ only in intro: 'create' opens sign-up
-  // first to mint a workspace + token, then continues straight into enrollment
-  // in the same session.
+  // 'create' (new personal workspace) runs the one-step browser device-auth
+  // handshake (`rubric login`), which mints a workspace + enrollment token and
+  // connects in the same session — no manual token copy/paste.
   if (choice === 'create') {
-    openSignupForAccount();
+    const { runLogin } = await import('./login.js');
+    await runLogin({ intent: 'create', ...options });
+    return;
   }
-  await runConnectedInit(paths, options);
+  // 'connected' — a pasted token (CI / scripting) still uses the direct
+  // enroll path; an interactive "join" runs the same browser handshake.
+  if (options.enrollmentToken || process.env['RUBRIC_ENROLLMENT_TOKEN']) {
+    await runConnectedInit(paths, options);
+  } else {
+    const { runLogin } = await import('./login.js');
+    await runLogin({ intent: 'join', ...options });
+  }
 }
 
 /**
@@ -234,7 +241,7 @@ function manageTip(): string {
  * the daemon via the platform service (with token-rotation kickstart +
  * health wait) or a detached spawn. Each caller writes its own config first.
  */
-async function finishInstall(paths: Paths, options: InitOptions): Promise<void> {
+export async function finishInstall(paths: Paths, options: InitOptions): Promise<void> {
   const daemonToken = crypto.randomBytes(32).toString('hex');
   writeFileSecure(paths.daemonTokenFile, daemonToken + '\n', { mode: 0o600 });
   process.stdout.write(`${ok(`wrote ${dim(paths.daemonTokenFile)} (0600)`)}\n`);
@@ -295,31 +302,6 @@ async function finishInstall(paths: Paths, options: InitOptions): Promise<void> 
       `${ok('daemon spawned as fallback')}  ${dim(`(pid in ${paths.pidFile})`)}\n` +
         `${dim('  load the service manually once the issue is fixed; see ' + (result.filePath ?? ''))}\n`,
     );
-  }
-}
-
-function openSignupForAccount(): void {
-  // The seamless `rubric login` browser handshake isn't built; bridge through
-  // web sign-up over the existing enrollment-token path. Open the browser, then
-  // fall straight into the enrollment-token prompt (runConnectedInit) so the
-  // whole thing completes in one session rather than re-running with a flag.
-  const signupUrl = 'https://app.rubric-app.com/sign-up';
-  tryOpenBrowser(signupUrl);
-  process.stdout.write(
-    `${info('Create your personal Rubric workspace:')} ${dim(signupUrl)}\n` +
-      `  (opening your browser…)  Once you're in, copy your enrollment token from\n` +
-      `  ${dim('Settings → Agents → New enrollment token')} and paste it below.\n\n`,
-  );
-}
-
-/** Best-effort: open a URL in the user's default browser. Never throws. */
-function tryOpenBrowser(url: string): void {
-  const cmd =
-    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-  try {
-    spawn(cmd, [url], { stdio: 'ignore', detached: true }).unref();
-  } catch {
-    /* best effort — the URL is printed above regardless */
   }
 }
 

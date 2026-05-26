@@ -52,9 +52,22 @@ export const PostToolUsePayloadSchema = HookPayloadBaseSchema.extend({
 });
 export type PostToolUsePayload = z.infer<typeof PostToolUsePayloadSchema>;
 
+// A configured MCP server reported to Rubric for discovery. Future Claude
+// Code versions may include these on the SessionStart payload directly; until
+// then the daemon discovers them from `.mcp.json` / `~/.claude.json`.
+export const ReportedMcpServerSchema = z.object({
+  name: z.string().min(1),
+  transport: z.string().optional(),
+  command: z.string().optional(),
+  url: z.string().optional(),
+  tools: z.array(z.string()).optional(),
+});
+export type ReportedMcpServer = z.infer<typeof ReportedMcpServerSchema>;
+
 export const SessionStartPayloadSchema = HookPayloadBaseSchema.extend({
   hook_event_name: z.literal(HOOK_EVENT_SESSION_START),
   source: z.string().optional(),
+  mcp_servers: z.array(ReportedMcpServerSchema).optional(),
 });
 export type SessionStartPayload = z.infer<typeof SessionStartPayloadSchema>;
 
@@ -75,6 +88,12 @@ export type PermissionDecision = 'allow' | 'deny' | 'ask';
 
 export interface HookResponse {
   continue: boolean;
+  /**
+   * Universal hook-output field: a warning message Claude Code shows to the
+   * *user* (not fed to Claude). The seatbelt uses it on PostToolUse to tell
+   * the developer a snapshot was taken and `rubric undo` can restore it.
+   */
+  systemMessage?: string;
   /** Top-level `decision` is the legacy field; new field is `permissionDecision`. */
   hookSpecificOutput?: {
     hookEventName: HookEventName;

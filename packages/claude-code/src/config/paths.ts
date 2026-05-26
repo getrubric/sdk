@@ -31,6 +31,8 @@ export interface Paths {
   ensureDaemonScriptFile: string;
   /** Solo mode: the editable local policy pack the daemon enforces. */
   policiesFile: string;
+  /** Git seatbelt: parent dir of per-project shadow repos (`<hash>/git`). */
+  seatbeltDir: string;
 }
 
 /**
@@ -62,5 +64,6 @@ export function defaultPaths(home: string = os.homedir(), platform: NodeJS.Platf
     claudeSettingsFile: path.join(home, '.claude', 'settings.json'),
     ensureDaemonScriptFile: path.join(configDir, 'ensure-daemon.sh'),
     policiesFile: path.join(configDir, 'policies.json'),
+    seatbeltDir: path.join(configDir, 'seatbelt'),
   };
 }

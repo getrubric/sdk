@@ -12,6 +12,7 @@
 
 import { scrubSecrets, type AuditEvent, type Evaluator } from '@rubric-app/core';
 
+import { isDestructiveGit } from '../seatbelt/classify.js';
 import { rubricMark } from './art.js';
 import { toEvaluationRequest } from './translate.js';
 import {
@@ -20,6 +21,7 @@ import {
   HOOK_EVENT_SESSION_START,
   type HookPayload,
   type HookResponse,
+  type ReportedMcpServer,
 } from './types.js';
 
 // Framework identifier stamped on every audit event so the dashboard
@@ -73,6 +75,45 @@ export interface HandlerDeps {
    * option so tests can inject deterministic timestamps.
    */
   now?: () => string;
+  /**
+   * Discovers configured MCP servers at SessionStart (best-effort), so
+   * Rubric's catalog learns about a server before its tools are called.
+   * Injected by the daemon in connected mode; omitted in solo (records
+   * nothing) and in unit tests (no discovery then).
+   */
+  discoverMcpServers?: (cwd?: string) => ReportedMcpServer[];
+  /**
+   * Git seatbelt: snapshot the working tree before a destructive git command
+   * runs. Injected by the daemon (closes over `paths` + shadow-repo helpers)
+   * and gated on the seatbelt config flag; omitted in unit tests unless they
+   * pass a spy. Best-effort — the implementation never throws, but the
+   * handler calls it inside a try/catch anyway so the decision path is never
+   * affected by a snapshot failure.
+   */
+  snapshot?: (args: {
+    cwd: string;
+    command: string;
+    sessionId: string;
+    /** Claude Code transcript path, used to label the snapshot with the prompt. */
+    transcriptPath?: string;
+  }) => void;
+  /**
+   * Reports whether a seatbelt snapshot was just taken for this session +
+   * command (set by the daemon alongside `snapshot`). Used on PostToolUse to
+   * nudge the user — only when a snapshot actually happened, so we never claim
+   * "we saved you" when nothing was captured (e.g. outside a git repo).
+   */
+  wasJustSnapshotted?: (sessionId: string, command: string) => boolean;
+}
+
+/** User-facing nudge surfaced after a destructive git command that we snapshotted. */
+const SEATBELT_NUDGE =
+  'Rubric snapshotted your working tree before that git command. ' +
+  'Run `rubric undo` to restore it (or `rubric undo --list` to pick a point).';
+
+/** Extract the Bash `command` string from a tool_input, or '' if absent. */
+function bashCommand(toolInput: Record<string, unknown>): string {
+  return typeof toolInput['command'] === 'string' ? (toolInput['command'] as string) : '';
 }
 
 export function handleHookPayload(payload: HookPayload, deps: HandlerDeps): HookResponse {
@@ -109,6 +150,34 @@ export function handleHookPayload(payload: HookPayload, deps: HandlerDeps): Hook
         ...(deps.agentVersion ? { version: deps.agentVersion } : {}),
       };
       deps.audit.enqueue(event);
+
+      // Git seatbelt: if this is an allowed-or-asked Bash command that
+      // discards work, snapshot the working tree *now* — before Claude Code
+      // executes it. The PreToolUse hook is synchronous, so the snapshot
+      // completes first. We skip `deny` (the command never runs) and require
+      // a cwd (the project root resolves from it). Best-effort and isolated:
+      // a snapshot failure must never change the decision we already made.
+      if (
+        deps.snapshot &&
+        payload.tool_name === 'Bash' &&
+        result.decision !== 'deny' &&
+        typeof payload.cwd === 'string' &&
+        payload.cwd.length > 0
+      ) {
+        const command = bashCommand(payload.tool_input);
+        if (isDestructiveGit(command)) {
+          try {
+            deps.snapshot({
+              cwd: payload.cwd,
+              command,
+              sessionId: payload.session_id,
+              ...(payload.transcript_path ? { transcriptPath: payload.transcript_path } : {}),
+            });
+          } catch {
+            // Swallow — seatbelt is a net, never a gate.
+          }
+        }
+      }
 
       return {
         continue: true,
@@ -151,10 +220,29 @@ export function handleHookPayload(payload: HookPayload, deps: HandlerDeps): Hook
         ...(deps.agentVersion ? { version: deps.agentVersion } : {}),
       };
       deps.audit.enqueue(event);
+
+      // Seatbelt nudge: if PreToolUse snapshotted before this exact command,
+      // tell the user (in their terminal) that they can undo it. Gated on a
+      // real snapshot having been taken so the message is never a false claim.
+      if (
+        deps.wasJustSnapshotted &&
+        payload.tool_name === 'Bash' &&
+        deps.wasJustSnapshotted(payload.session_id, bashCommand(payload.tool_input))
+      ) {
+        return { continue: true, systemMessage: SEATBELT_NUDGE };
+      }
       return { continue: true };
     }
 
     case HOOK_EVENT_SESSION_START: {
+      // Discover configured MCP servers (payload-reported ∪ file-discovered),
+      // deduped by name. The control plane upserts these into the catalog and
+      // opens pending grants — richer + earlier than tool-name discovery.
+      const mcpServers = mergeReportedServers(
+        payload.mcp_servers ?? [],
+        deps.discoverMcpServers?.(payload.cwd) ?? [],
+      );
+
       const event: AuditEvent = {
         agentId: deps.agentId,
         sessionId: payload.session_id,
@@ -171,6 +259,7 @@ export function handleHookPayload(payload: HookPayload, deps: HandlerDeps): Hook
         metadata: {
           hook: HOOK_EVENT_SESSION_START,
           ...(payload.source ? { source: payload.source } : {}),
+          ...(mcpServers.length > 0 ? { mcpServers } : {}),
         },
         framework: FRAMEWORK_CLAUDE_CODE,
         ...(deps.agentVersion ? { version: deps.agentVersion } : {}),
@@ -192,6 +281,18 @@ export function handleHookPayload(payload: HookPayload, deps: HandlerDeps): Hook
 
 function assertNever(x: never): never {
   throw new Error(`handleHookPayload: non-exhaustive switch on ${JSON.stringify(x)}`);
+}
+
+/** Union two reported-server lists, deduping by name (first wins). */
+function mergeReportedServers(
+  a: ReportedMcpServer[],
+  b: ReportedMcpServer[],
+): ReportedMcpServer[] {
+  const byName = new Map<string, ReportedMcpServer>();
+  for (const s of [...a, ...b]) {
+    if (!byName.has(s.name)) byName.set(s.name, s);
+  }
+  return [...byName.values()];
 }
 
 /**

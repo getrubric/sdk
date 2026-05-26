@@ -168,8 +168,10 @@ test('startServer refuses to bind a non-loopback host', async () => {
   );
 });
 
-test('startServer accepts loopback hosts', async () => {
-  for (const host of ['127.0.0.1', 'localhost']) {
+test('startServer accepts numeric loopback hosts', async () => {
+  // Only numeric loopback literals — the hostname `localhost` is rejected
+  // because it can resolve off-loopback.
+  for (const host of ['127.0.0.1', '::1']) {
     const s = await startServer({
       host,
       port: 0,
@@ -179,6 +181,20 @@ test('startServer accepts loopback hosts', async () => {
     });
     await s.close();
   }
+});
+
+test('startServer refuses to bind the hostname localhost', async () => {
+  await assert.rejects(
+    () =>
+      startServer({
+        host: 'localhost',
+        port: 0,
+        daemonToken: TOKEN,
+        logger: SILENT_LOGGER,
+        handlerDeps: { evaluator: ALLOW_EVALUATOR, audit: nullSink(), agentId: 'a' },
+      }),
+    /refusing to bind 'localhost'/,
+  );
 });
 
 test('bearer scheme is case-insensitive (RFC 7235)', async () => {

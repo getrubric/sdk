@@ -6,6 +6,7 @@
 import { z } from 'zod';
 
 import {
+  BUNDLE_SIGNATURE_ALG,
   DECISION_VALUES,
   POLICY_API_VERSION,
   POLICY_CONDITION_OPERATOR_VALUES,
@@ -109,14 +110,28 @@ export type BundlePolicyEntry = z.infer<typeof BundlePolicyEntrySchema>;
 // `enforce` is true: an `mcp__<server>__*` call whose server slug isn't in
 // `approvedServers` is blocked by the evaluator. Older control planes may omit
 // the whole object — `.default()` keeps such bundles valid, and an absent
-// `enforce` defaults true so connected bundles fail closed.
+// `enforce` defaults true so connected bundles default to deny.
 export const BundleMcpAccessSchema = z.object({
   approvedServers: z.array(z.string().min(1)).default([]),
   enforce: z.boolean().default(true),
 });
 export type BundleMcpAccess = z.infer<typeof BundleMcpAccessSchema>;
 
-export const BundleSchema = z.object({
+// Signature envelope. `signature` is a base64 Ed25519 detached signature
+// over the canonical serialization of the bundle's *content* fields (see
+// `canonicalBundleBytes`). `contentHash` stays a plain integrity checksum; the
+// signature is what proves the bundle came from the control plane. MUST stay
+// in sync with the server's `BundleSignatureSchema` in
+// `@agent-governance/shared`.
+export const BundleSignatureSchema = z.object({
+  signatureAlg: z.literal(BUNDLE_SIGNATURE_ALG),
+  keyId: z.string().min(1),
+  signature: z.string().min(1),
+});
+export type BundleSignature = z.infer<typeof BundleSignatureSchema>;
+
+// Content fields — everything the signature commits to.
+export const BundleContentSchema = z.object({
   bundleVersion: z.number().int().nonnegative(),
   contentHash: z.string().regex(/^[a-f0-9]{64}$/),
   builtAt: z.string().datetime(),
@@ -124,12 +139,45 @@ export const BundleSchema = z.object({
   frozenAgentIds: z.array(z.string().min(1).max(128)).default([]),
   mcpAccess: BundleMcpAccessSchema.default({ approvedServers: [], enforce: true }),
 });
+export type BundleContent = z.infer<typeof BundleContentSchema>;
+
+// `signature` is optional at the schema level so the locally-trusted offline
+// baseline pack (compiled in-process, never fetched, so it has no signature)
+// still parses. Network-pulled bundles are checked by `verifyBundleSignature`
+// in `bundle.ts`'s `_pullOnce`, which drops any bundle whose signature is
+// missing or doesn't verify.
+export const BundleSchema = BundleContentSchema.extend({
+  signature: BundleSignatureSchema.optional(),
+});
 export type Bundle = z.infer<typeof BundleSchema>;
+
+/**
+ * Deterministic byte serialization of a bundle's content for signature
+ * verification. MUST stay byte-for-byte identical to the server's
+ * `canonicalBundleBytes` (`@agent-governance/shared`): keys emitted in a fixed
+ * (sorted) order recursively, excluding the `signature` envelope.
+ */
+export function canonicalBundleBytes(content: BundleContent): Buffer {
+  return Buffer.from(stableStringify(content), 'utf8');
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  const parts = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`);
+  return `{${parts.join(',')}}`;
+}
 
 // ---- Audit event -----------------------------------------------------------
 // Outgoing events are NOT validated against this schema on the hot
 // path — the caller built them in-process, so it would be a CPU spend
-// with no fail-closed value, and the server rejects malformed batches
+// with no enforcement value, and the server rejects malformed batches
 // with 4xx (which the sink drops with a logged reason and visible
 // counter). The schema is exported so SDK consumers can typecheck
 // their own event constructors.

@@ -167,6 +167,13 @@ MCP_TOOL_NAME_PREFIX: Final = "mcp__"
 MCP_TOOL_NAME_DELIMITER: Final = "__"
 MCP_TOOL_NAME_PARTS: Final = 3  # "mcp", "<server>", "<tool>"
 
+# Request field carrying the *raw* `mcp__<server>__<tool>` name when an
+# adapter has stripped the prefix off `tool_name` for policy-condition
+# matching. The MCP allow-list gate parses this so the server check still
+# runs against the prefixed name. Absent → the gate falls back to
+# `tool_name` (which is the raw name for callers that don't strip).
+EVAL_REQUEST_FIELD_MCP_TOOL_NAME: Final = "mcp_tool_name"
+
 # ---- MCP server gating ------------------------------------------------------
 # Default-deny enforcement of the per-agent MCP allow-list carried in the
 # bundle (`mcpAccess`). When the control plane ships a bundle with

@@ -33,14 +33,13 @@
   },
   "files": [
     "dist",
-    "src",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && RUBRIC_INTERNAL_ALLOW_LOOPBACK_FOR_TESTS=1 node --test test/*.test.mjs",
+    "test": "pnpm build && NODE_ENV=test RUBRIC_INTERNAL_ALLOW_LOOPBACK_FOR_TESTS=1 node --test test/*.test.mjs",
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {

@@ -138,7 +138,7 @@ class BundlePoller:
         """Most recent successful HTTP response (200/304/204).
 
         Use this to detect a stuck poller. Combined with
-        `last_bundle_change_at` to detect a "304-forever" attack.
+        `last_bundle_change_at` to detect a "304-forever" condition.
         """
         return self._last_pull_at
 

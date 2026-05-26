@@ -7,9 +7,18 @@ because they cover the highest-signal types (PII basics + secrets).
 
 from __future__ import annotations
 
-import re
+import logging
 from dataclasses import dataclass
 from typing import Pattern
+
+# `regex` (PyPI) is API-compatible with stdlib `re` but adds a `timeout=`
+# kwarg that aborts a single match with `TimeoutError` once the budget is
+# exceeded. The policy evaluator already uses it for exactly this reason
+# (see `evaluator._matches`); DLP recognizers run on the same hot path and
+# over untrusted tool input, so they use it the same way to bound time spent
+# matching. It is already a hard dependency (see pyproject.toml) — no new dep
+# is added.
+import regex as re
 
 from rubric.constants import (
     DLP_KEYISH_FIELD_PATTERN,
@@ -37,6 +46,18 @@ _DLP_TYPE_SLACK_TOKEN = "SLACK_TOKEN"
 _DLP_TYPE_HEX64_TOKEN = "HEX64_TOKEN"
 
 
+log = logging.getLogger(__name__)
+
+# Per-string wall-clock budget for a single recognizer's scan. Matches the
+# evaluator's `_MATCH_TIMEOUT_SECONDS` — generous for any well-formed
+# pattern over the (already 64KB-capped) payload, but bounds the time spent
+# matching untrusted input. On timeout the recognizer yields no spans (treated
+# as "did not detect" for that recognizer/string) rather than hanging the
+# evaluate path; the per-call DLP signal in `client._run_dlp` still covers a
+# detector-level crash.
+DLP_MATCH_TIMEOUT_SECONDS = 0.5
+
+
 @dataclass(frozen=True)
 class Recognizer:
     type: str
@@ -44,7 +65,18 @@ class Recognizer:
     requires_keyish_field: bool = False
 
     def find(self, value: str) -> list[tuple[int, int]]:
-        return [m.span() for m in self.pattern.finditer(value)]
+        try:
+            return [
+                m.span()
+                for m in self.pattern.finditer(value, timeout=DLP_MATCH_TIMEOUT_SECONDS)
+            ]
+        except TimeoutError:
+            log.warning(
+                "DLP recognizer exceeded per-string timeout; treating as no-match "
+                "(type=%s)",
+                self.type,
+            )
+            return []
 
 
 # Recognizers that match by content alone.

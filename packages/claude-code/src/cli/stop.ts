@@ -7,7 +7,7 @@
 //   2. On 202: wait up to 5s for the process to exit (poll
 //      `kill(pid, 0)` purely as a liveness probe; not for identity).
 //   3. On 401 or connection refused: the daemon at that pid is not
-//      ours. Refuse to SIGTERM. `--force` bypasses this guard for the
+//      ours. Refuse to SIGTERM. `--force` skips this guard for the
 //      legacy "kill any pidfile" behavior, which we leave available
 //      for edge cases (stuck pre-1.0 daemon that doesn't speak
 //      /v1/shutdown, etc.).
@@ -107,7 +107,7 @@ export async function runStop(options: StopOptions = {}): Promise<void> {
           `${fail(
             `could not reach daemon shutdown endpoint on :${port}: ${(err as Error).message}. ` +
               `Refusing to SIGTERM pid ${pid} without identity proof. ` +
-              `Use 'rubric stop --force' to bypass (only if you trust the pidfile).`,
+              `Use 'rubric stop --force' to skip this check (only if you trust the pidfile).`,
           )}\n`,
         );
         process.exit(1);

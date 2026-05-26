@@ -84,7 +84,7 @@ def _parse_iso_to_epoch(iso: str) -> float:
 def _safe_capped_epoch(iso: str) -> float:
     """Parse server-provided expiresAt and cap at _MAX_TOKEN_TTL_SECONDS.
 
-    A malicious or misconfigured server returning `expiresAt: "9999-12-31"`
+    A misconfigured server returning `expiresAt: "9999-12-31"`
     would otherwise push refresh into a never-firing sleep. If the input is
     unparseable, fall back to `now + _REFRESH_FALLBACK_SLEEP_SECONDS` so the
     loop neither hot-spins nor sleeps forever, and warn so operators see it.
@@ -276,8 +276,8 @@ class TokenStore:
         body = _ExchangeResponse.model_validate(res.json())
         with self._lock:
             # Identity-rotation guard: agentId/identityId are server-stable
-            # across refreshes. A compromised server swapping them mid-flight
-            # would silently re-attribute audit events to a different agent.
+            # across refreshes. If the server returned different ones mid-flight
+            # it would re-attribute audit events to a different agent.
             if self._agent_id is not None and body.agentId != self._agent_id:
                 self._dead = True
                 raise IdentityRevokedError("agent identity changed on refresh")

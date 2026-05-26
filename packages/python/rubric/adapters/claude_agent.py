@@ -58,6 +58,10 @@ def governance_hook(
             session_id=session_id,
             metadata=EvaluationMetadata(input=tool_input, tool_use_id=tool_use_id),
             framework=FRAMEWORK_CLAUDE_AGENT,
+            # Forward the raw `mcp__<server>__<tool>` name so the MCP
+            # allow-list gate can check the server even though `tool_name`
+            # has been stripped to the canonical form for policy matching.
+            mcp_tool_name=raw_name,
         )
 
         if result.decision == DECISION_DENY:

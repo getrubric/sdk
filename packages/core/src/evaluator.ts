@@ -4,7 +4,7 @@
 //
 //   1. If the bundle lists `request.agent_id` in `frozenAgentIds`, return
 //      `deny / AGENT_FROZEN` before any rule fires — kill-switch.
-//   2. If the bundle is null or has no policies, fail closed with
+//   2. If the bundle is null or has no policies, default to deny with
 //      `deny / NO_POLICIES`. The daemon also gates `/v1/hook` on a
 //      successful first bundle pull, but the evaluator itself refuses
 //      to be permissive without an authoritative bundle as defense in
@@ -19,11 +19,11 @@
 //      `spec.defaultEffect`.
 //
 // `matches` conditions are evaluated under `re2`, a non-backtracking
-// regex engine — ReDoS is impossible by construction. The cost is that
-// re2 doesn't support lookaround or backreferences; patterns using
-// those fail to compile. We treat compile failure as fail-closed: any
-// policy containing an uncompileable pattern is marked "errored" and
-// every evaluation that touches it returns
+// regex engine, so match time stays linear in the input length regardless
+// of the pattern. The cost is that re2 doesn't support lookaround or
+// backreferences; patterns using those fail to compile. We treat compile
+// failure as a deny: any policy containing an uncompileable pattern is
+// marked "errored" and every evaluation that touches it returns
 // `deny / POLICY_COMPILE_ERROR`. Regex patterns are pre-compiled in
 // `updateBundle()` rather than at evaluation time so the native binding
 // cost is paid once per bundle, not once per tool call.
@@ -126,7 +126,7 @@ export class Evaluator {
   private _compiledPatterns = new WeakMap<PolicyCondition, RE2>();
   // Policy IDs whose document contains at least one `matches` condition
   // whose pattern failed to compile under re2. Populated in `updateBundle`,
-  // checked on every evaluation. Fail-closed: any request that would
+  // checked on every evaluation. Defaults to deny: any request that would
   // otherwise be evaluated against such a policy returns DENY.
   private _erroredPolicyIds = new Set<string>();
   private readonly _onCompileError: EvaluatorOptions['onCompileError'];
@@ -198,7 +198,7 @@ export class Evaluator {
     // isn't in the agent's approved set fails closed *before* policy
     // evaluation (so even a policy-less agent gets the actionable reason).
     // `enforce: false` (solo / local bundles) turns the gate off; absent →
-    // true so connected bundles fail closed.
+    // true so connected bundles default to deny.
     if (bundle !== null) {
       const parsed = parseMcpServer(request.tool_name);
       const approvedServers = bundle.mcpAccess?.approvedServers ?? [];
@@ -322,9 +322,19 @@ export class Evaluator {
     }
 
     if (matchedPolicyId === null) {
-      // No rule matched — fall through to first policy's defaultEffect.
-      // `bundle.policies[0]` is safe: we returned early on empty policies.
-      const defaultEffect: Decision = bundle.policies[0]!.document.spec.defaultEffect;
+      // No rule matched — resolve the default across ALL policies in an
+      // order-independent way: deny if ANY policy defaults to deny, else ask
+      // if ANY defaults to ask, else allow. Resolving across every policy
+      // (rather than honoring only `policies[0]`) means the result does not
+      // depend on policy ordering. The shipped all-`allow` pack still
+      // resolves to allow. `bundle.policies` is non-empty here: we returned
+      // early on empty policies.
+      const defaults = bundle.policies.map((p) => p.document.spec.defaultEffect);
+      const defaultEffect: Decision = defaults.includes(DECISION_DENY)
+        ? DECISION_DENY
+        : defaults.includes(DECISION_ASK)
+          ? DECISION_ASK
+          : DECISION_ALLOW;
       return { decision: defaultEffect, latencyMs: elapsedMs(start) };
     }
 
@@ -372,7 +382,7 @@ export class Evaluator {
     // case we wouldn't have reached this code path — the policy-level
     // POLICY_COMPILE_ERROR fires earlier) or the evaluator is being driven
     // with a condition object that didn't come from the cached bundle.
-    // Fail-closed (no match) in both cases.
+    // Returns no match in both cases.
     if (!re) return false;
     const actualStr = typeof actual === 'string' ? actual : String(actual);
     return re.test(actualStr);

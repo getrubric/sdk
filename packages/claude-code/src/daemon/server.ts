@@ -34,7 +34,11 @@ export const DEFAULT_DAEMON_PORT = 47821;
 
 // Host whitelist. The daemon is designed to serve callers on the same
 // machine only; `startServer` refuses to bind anything outside this set.
-const ALLOWED_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', '::1', 'localhost']);
+// Only numeric loopback literals are accepted — the hostname `localhost`
+// is excluded because it can resolve to a non-loopback address (e.g. via
+// /etc/hosts or a DNS shim mapping it to a routable address), which would
+// make the daemon reachable beyond the local machine.
+const ALLOWED_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', '::1']);
 
 // Cap the hook payload size. Claude Code's payloads are small (tool
 // input + cwd + transcript_path); 1 MiB is generous and protects
@@ -60,9 +64,9 @@ const CONNECTIONS_CHECKING_INTERVAL_MS = 2_000;
 
 export interface StartServerOptions {
   /**
-   * Bind host. Default `127.0.0.1`. Restricted to the loopback
-   * whitelist (`127.0.0.1`, `::1`, `localhost`) — passing anything
-   * else throws synchronously at startup.
+   * Bind host. Default `127.0.0.1`. Restricted to the numeric loopback
+   * whitelist (`127.0.0.1`, `::1`) — passing anything else (including the
+   * hostname `localhost`) throws synchronously at startup.
    */
   host?: string;
   port?: number;

@@ -30,6 +30,26 @@ test('destructive git commands are flagged', () => {
   }
 });
 
+test('destructive git survives the global-option block and flag reordering', () => {
+  const commands = [
+    'git -C /path reset --hard', // -C <dir> global option before subcommand
+    'git -c core.x=y reset --hard', // -c <k=v> global option before subcommand
+    'git --git-dir=/r/.git checkout -- .', // attached global option
+    'git --work-tree=/r checkout -- .',
+    'git clean -d -f', // force split into its own token, reordered
+    'git clean -f -d',
+    'git checkout -f', // force discards the worktree
+    'git checkout --force',
+    'git checkout HEAD~1 -- file', // ref before the pathspec separator
+    'git restore --staged --worktree file', // --worktree discards despite --staged
+    'GIT_DIR=/r/.git git reset --hard', // leading env-assignment
+    'git -C /path clean -d -f',
+  ];
+  for (const cmd of commands) {
+    assert.equal(isDestructiveGit(cmd), true, `expected destructive: ${cmd}`);
+  }
+});
+
 test('safe / non-discarding commands are not flagged', () => {
   const safe = [
     'git status',
@@ -44,6 +64,13 @@ test('safe / non-discarding commands are not flagged', () => {
     'git branch -d merged-branch', // safe delete (lowercase d, no --force)
     'ls -la',
     'rm -rf /tmp/scratch',
+    'git -C /path status', // global option before a safe subcommand
+    'git --git-dir=/r/.git log', // attached global option, safe subcommand
+    'git -c core.pager=cat diff', // -c <k=v> then safe subcommand
+    'git restore --staged src/app.ts', // unstaging only (no --worktree)
+    'git checkout -b new-feature', // creating/switching branch, not discarding
+    'cd /tmp/.git/checkout && ls', // path containing "git checkout", not a git cmd
+    'echo git reset --hard', // mentions the command but does not run git
   ];
   for (const cmd of safe) {
     assert.equal(isDestructiveGit(cmd), false, `expected safe: ${cmd}`);

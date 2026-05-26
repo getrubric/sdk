@@ -73,11 +73,27 @@ export const ALLOWED_HOST_SUFFIX = '.rubric-app.com';
 
 // Internal: the SDK's own integration tests need to run against a local
 // mock HTTP server. This env var allows http://127.0.0.1 / http://localhost
-// as an API URL ONLY when set. It is intentionally undocumented and is
-// never set in production builds — package.json test scripts set it at
-// invocation time. Never set this yourself.
+// as an API URL ONLY when set AND only in a non-production runtime
+// (`NODE_ENV` of `test` or `development`). Both conditions are required, so
+// the test-only loopback allowance cannot take effect in production even if
+// the env var is present there. It is intentionally undocumented;
+// package.json test scripts set both vars at invocation time. Never set this
+// yourself.
 const TEST_LOOPBACK_ESCAPE_ENV = 'RUBRIC_INTERNAL_ALLOW_LOOPBACK_FOR_TESTS';
+const NON_PRODUCTION_NODE_ENVS = new Set(['test', 'development']);
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
+/**
+ * True only when the test-only loopback allowance is both requested (the
+ * internal env var is `'1'`) and permitted (a non-production `NODE_ENV`).
+ * Both must hold; either alone leaves the strict allowlist in force.
+ */
+function loopbackEscapeEnabled(): boolean {
+  return (
+    process.env[TEST_LOOPBACK_ESCAPE_ENV] === '1' &&
+    NON_PRODUCTION_NODE_ENVS.has(process.env['NODE_ENV'] ?? '')
+  );
+}
 
 /**
  * Validate an API URL. Returns `null` on accept, or a human-readable
@@ -95,7 +111,7 @@ export function validateApiUrl(input: string): string | null {
   }
   const host = url.hostname.toLowerCase();
   if (
-    process.env[TEST_LOOPBACK_ESCAPE_ENV] === '1' &&
+    loopbackEscapeEnabled() &&
     LOOPBACK_HOSTS.has(host) &&
     (url.protocol === 'http:' || url.protocol === 'https:')
   ) {
@@ -157,3 +173,23 @@ export function parseMcpServer(toolName: string): { server: string; tool: string
 export function denyReasonMcpNotApproved(server: string): string {
   return `MCP server "${server}" is not approved for this agent. Request access in your Rubric dashboard.`;
 }
+
+// ---- Bundle signature verification -----------------------------------------
+// Network-fetched bundles carry a valid Ed25519 detached signature over their
+// canonical content bytes. The SDK pins the control plane's PUBLIC key at
+// build time and verifies each bundle against it; the matching PRIVATE key is
+// held only by the API. Bundles that are unsigned or that don't verify are
+// dropped — the poller keeps the last good bundle (or, with no policies,
+// default-deny).
+
+export const BUNDLE_SIGNATURE_ALG = 'ed25519';
+export const BUNDLE_SIGNING_KEY_ID = 'rubric-bundle-signing-v1';
+
+/**
+ * Pinned Ed25519 PUBLIC key (base64 SPKI DER) for verifying control-plane
+ * bundle signatures. The matching PRIVATE key is held only by the API and set
+ * via its `BUNDLE_SIGNING_PRIVATE_KEY` env var. Rotating the signing key means
+ * shipping a new SDK build with a new value here (and a new keyId).
+ */
+export const BUNDLE_SIGNING_PUBLIC_KEY_SPKI_B64 =
+  'MCowBQYDK2VwAyEA8PrItIcazMQf8oDtQvH7ty+7a5evcmNPNXEAR0AAWTM=';

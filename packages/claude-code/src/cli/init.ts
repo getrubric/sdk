@@ -325,7 +325,7 @@ async function collectConfig(options: InitOptions, paths: Paths): Promise<Persis
   // self-hosted path. `apiUrl` is therefore NOT prompted for; it
   // resolves from (in priority order):
   //   1. `--api-url` flag
-  //   2. `RUBRIC_API_URL` env var (escape hatch for staging / dev)
+  //   2. `RUBRIC_API_URL` env var (override for staging / dev)
   //   3. previously-persisted `~/.config/rubric/config.json`
   //   4. `DEFAULT_API_URL` constant (production)
   // The URL validator still runs to refuse plaintext http:// for any

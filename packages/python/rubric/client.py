@@ -20,6 +20,7 @@ from rubric.constants import (
     DLP_SEVERITY_HIGH,
     DlpMode,
     ENV_DLP,
+    EVAL_REQUEST_FIELD_MCP_TOOL_NAME,
 )
 from rubric.dlp.detector import Detector, make_detector
 from rubric.dlp.types import DlpDetection
@@ -51,7 +52,7 @@ MAX_TOOL_INPUT_BYTES = 256 * 1024
 
 # Keys a caller is allowed to set via `EvaluationMetadata` (which uses
 # ``extra="allow"``). Anything else is dropped before the dict is splatted
-# into ``EvaluationRequest`` — otherwise a malicious caller could pass
+# into ``EvaluationRequest`` — otherwise a caller could pass
 # ``dlp_detected=False`` and override the in-process DLP scan.
 _ALLOWED_METADATA_KEYS: frozenset[str] = frozenset(
     {"session_id", "trace_id", "input", "args", "kwargs", "tool_use_id"}
@@ -174,18 +175,26 @@ class Governance:
         metadata: EvaluationMetadata | None = None,
         framework: str | None = None,
         trace: TraceContext | None = None,
+        mcp_tool_name: str | None = None,
     ) -> EvaluationResult:
         """Evaluate a tool call against the current bundle and ship an audit event.
 
         `agent_id` is locked to the identity issued at bootstrap; passing a
         different value is silently ignored (server-side, the JWT-bound
         identity is the source of truth and a mismatch returns 403).
+
+        `mcp_tool_name` carries the *raw* ``mcp__<server>__<tool>`` name when
+        the caller has already stripped the prefix off `tool_name` for policy
+        matching (the framework adapters do this). The MCP allow-list gate
+        parses it so the server check runs on the prefixed name; policy
+        *conditions* still see the canonical `tool_name`. When omitted, the
+        gate falls back to `tool_name`.
         """
         metadata_dict = metadata.model_dump(exclude_none=True) if metadata else {}
 
         # Filter caller-supplied metadata to a known-safe key set BEFORE the
-        # dict is splatted into `EvaluationRequest`. Without this, a malicious
-        # caller could pass `metadata={"dlp_detected": False}` and clobber the
+        # dict is splatted into `EvaluationRequest`. Without this, a caller
+        # could pass `metadata={"dlp_detected": False}` and clobber the
         # in-process DLP scan result downstream.
         truncated_flag = False
         if metadata_dict:
@@ -238,11 +247,23 @@ class Governance:
             # so policies can write `dlp_detected eq true → deny` cleanly.
             dlp_request_fields = {DLP_REQUEST_FIELD_DETECTED: False}
 
+        # Forward the raw `mcp__<server>__<tool>` name (if the caller stripped
+        # the prefix for policy matching) so the evaluator's MCP allow-list
+        # gate can recover the server. `mcp_tool_name` is intentionally absent
+        # from `_ALLOWED_METADATA_KEYS`, so it can't be set via `metadata` —
+        # only this trusted parameter sets it.
+        gate_fields: dict[str, Any] = (
+            {EVAL_REQUEST_FIELD_MCP_TOOL_NAME: mcp_tool_name}
+            if mcp_tool_name is not None
+            else {}
+        )
+
         request = EvaluationRequest(
             tool_name=tool_name,
             agent_id=effective_agent_id,
             **metadata_dict,
             **dlp_request_fields,
+            **gate_fields,
         )
         result = self._evaluator.evaluate(request)
 
@@ -349,11 +370,11 @@ def _run_dlp(detector: Detector | None, metadata: dict[str, Any]) -> DlpDetectio
     try:
         return detector.detect(payload)
     except Exception as e:
-        # Fail-closed: a detector crash MUST NOT silently become "no
-        # detection," or any `dlp_detected eq true → deny` policy becomes a
-        # one-shot bypass — trigger the crash and the deny rule never fires.
-        # Surface a synthetic high-severity signal so the policy still bites.
-        log.error("DLP detector raised: %s; emitting fail-closed signal", type(e).__name__)
+        # A detector crash must not become "no detection," or any
+        # `dlp_detected eq true → deny` policy would stop firing on the very
+        # input that crashed the detector. Surface a synthetic high-severity
+        # signal so the policy still applies.
+        log.error("DLP detector raised: %s; emitting fallback detection signal", type(e).__name__)
         return DlpDetection(
             detected=True,
             severity=DLP_SEVERITY_HIGH,

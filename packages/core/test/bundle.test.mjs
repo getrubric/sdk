@@ -9,8 +9,38 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createPrivateKey, sign } from 'node:crypto';
 
-import { BundlePoller, IdentityRevokedError } from '../dist/index.js';
+import {
+  BundlePoller,
+  IdentityRevokedError,
+  BUNDLE_SIGNATURE_ALG,
+  BUNDLE_SIGNING_KEY_ID,
+  canonicalBundleBytes,
+} from '../dist/index.js';
+
+// The Ed25519 PRIVATE key matching the PUBLIC key pinned in
+// `BUNDLE_SIGNING_PUBLIC_KEY_SPKI_B64`. Tests sign bundles with it so the
+// poller's verifier accepts them — exactly what the real API does. Base64
+// PKCS8 DER. (Test-only; the real private key lives in the API's
+// BUNDLE_SIGNING_PRIVATE_KEY env var.)
+const SIGNING_PRIVATE_KEY_PKCS8_B64 =
+  'MC4CAQAwBQYDK2VwBCIEILsn9FgVpUlNZXYoDx9jn8pnPdjDt3o/3c0lKF0aJJqK';
+
+const TEST_PRIVATE_KEY = createPrivateKey({
+  key: Buffer.from(SIGNING_PRIVATE_KEY_PKCS8_B64, 'base64'),
+  format: 'der',
+  type: 'pkcs8',
+});
+
+// Attach a valid signature to a content bundle, matching the server's signer.
+function signContent(content) {
+  const signature = sign(null, canonicalBundleBytes(content), TEST_PRIVATE_KEY).toString('base64');
+  return {
+    ...content,
+    signature: { signatureAlg: BUNDLE_SIGNATURE_ALG, keyId: BUNDLE_SIGNING_KEY_ID, signature },
+  };
+}
 
 const VALID_HASH_A = 'a'.repeat(64);
 const VALID_HASH_B = 'b'.repeat(64);
@@ -45,8 +75,12 @@ function mkBundleWire({
     },
   ],
   frozenAgentIds = [],
+  mcpAccess = { approvedServers: [], enforce: true },
 }) {
-  return { bundleVersion, contentHash, builtAt, policies, frozenAgentIds };
+  // Sign the FULLY-populated content (every field present) exactly as the
+  // server does — the API's signer always emits a complete BundleContent, so
+  // the wire bytes and the verifier's post-parse bytes agree byte-for-byte.
+  return signContent({ bundleVersion, contentHash, builtAt, policies, frozenAgentIds, mcpAccess });
 }
 
 // A simple JSON-returning Response-like object suitable for fetch stubbing.
@@ -308,4 +342,71 @@ test('regression: IdentityRevokedError does not terminate the poll loop', async 
   assert.ok(fetchCalls >= 1, 'poller should fetch after recovering from the revoked-identity throw');
   assert.ok(poller.lastPullAt instanceof Date, 'a successful pull should follow recovery');
   assert.ok(tokenCalls >= 2, 'token() should be called again after the first throw');
+});
+
+// ---- Bundle signature verification ----------------------------------------
+
+test('poller accepts a correctly-signed bundle', async () => {
+  const wire = mkBundleWire({ bundleVersion: 1, contentHash: VALID_HASH_A });
+  const { poller, events } = await runOnePull([jsonResponse(wire, { status: 200 })]);
+  assert.equal(events.updates.length, 1);
+  assert.equal(poller.current.bundleVersion, 1);
+  assert.equal(poller.lastRejectedBundleAt, null);
+  assert.equal(events.errors.length, 0);
+});
+
+test('poller rejects a bundle with no signature', async () => {
+  // A well-formed bundle with NO signature envelope. It must not pass the
+  // verify gate and must never become current.
+  const content = {
+    bundleVersion: 1,
+    contentHash: VALID_HASH_A,
+    builtAt: new Date().toISOString(),
+    policies: [],
+    frozenAgentIds: [],
+  };
+  const { poller, events } = await runOnePull([jsonResponse(content, { status: 200 })]);
+  assert.equal(poller.current, null, 'unsigned bundle must not become current');
+  assert.equal(events.updates.length, 0);
+  assert.ok(events.errors.length >= 1, 'rejection should surface via onError');
+});
+
+test('poller rejects a bundle whose content was modified after signing', async () => {
+  // Sign a benign deny-all bundle, then modify the bundle after signing so the
+  // signature no longer matches the canonical bytes.
+  const wire = mkBundleWire({ bundleVersion: 1, contentHash: VALID_HASH_A });
+  const modified = {
+    ...wire,
+    frozenAgentIds: ['some-agent'], // mutate a signed field; signature is now stale
+  };
+  const { poller, events } = await runOnePull([jsonResponse(modified, { status: 200 })]);
+  assert.equal(poller.current, null, 'modified bundle must not become current');
+  assert.equal(events.updates.length, 0);
+  assert.ok(events.errors.length >= 1);
+  assert.ok(poller.lastRejectedBundleAt instanceof Date);
+  assert.match(poller.lastRejectionReason ?? '', /signature/);
+});
+
+test('poller rejects a bundle signed by a non-pinned key', async () => {
+  // Re-sign with a freshly generated, unpinned keypair — a server holding some
+  // other private key. Verification against the pinned public key must fail.
+  const { generateKeyPairSync } = await import('node:crypto');
+  const { privateKey: wrongKey } = generateKeyPairSync('ed25519');
+  const content = {
+    bundleVersion: 1,
+    contentHash: VALID_HASH_A,
+    builtAt: new Date().toISOString(),
+    policies: [],
+    frozenAgentIds: [],
+    mcpAccess: { approvedServers: [], enforce: true },
+  };
+  const signature = sign(null, canonicalBundleBytes(content), wrongKey).toString('base64');
+  const wire = {
+    ...content,
+    signature: { signatureAlg: BUNDLE_SIGNATURE_ALG, keyId: BUNDLE_SIGNING_KEY_ID, signature },
+  };
+  const { poller, events } = await runOnePull([jsonResponse(wire, { status: 200 })]);
+  assert.equal(poller.current, null);
+  assert.equal(events.updates.length, 0);
+  assert.match(poller.lastRejectionReason ?? '', /signature/);
 });

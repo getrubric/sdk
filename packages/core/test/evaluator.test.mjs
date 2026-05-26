@@ -1,6 +1,6 @@
 // Tests for the Evaluator. Cases cover the full operator surface,
 // deny-short-circuit, last-allow-wins semantics, dot-path field
-// resolution, the frozen-agent kill switch, and regex fail-closed
+// resolution, the frozen-agent kill switch, and regex deny-by-default
 // behavior on uncompileable patterns.
 
 import { test } from 'node:test';
@@ -48,7 +48,7 @@ function cond(field, operator, value) {
 
 test('empty bundle (no policies) → deny / NO_POLICIES', () => {
   // A server returning `{ policies: [] }` must not silently turn off
-  // enforcement — fail-closed.
+  // enforcement — it defaults to deny.
   const ev = new Evaluator();
   ev.updateBundle(mkBundle());
   const r = ev.evaluate({ tool_name: 'echo' });
@@ -58,7 +58,7 @@ test('empty bundle (no policies) → deny / NO_POLICIES', () => {
 });
 
 test('no updateBundle ever called (cold start) → deny / NO_POLICIES', () => {
-  // Cold-start fail-closed at the evaluator level. The daemon also
+  // Cold-start defaults to deny at the evaluator level. The daemon also
   // gates `/v1/hook` on first-pull success, but the evaluator does the
   // right thing on its own.
   const ev = new Evaluator();
@@ -83,6 +83,58 @@ test('no rule matches → falls through to first policy’s defaultEffect (deny)
   assert.equal(r.decision, 'deny');
   // No matched rule when falling through to defaultEffect.
   assert.equal(r.matchedRuleId, undefined);
+});
+
+test('no rule matches → mixed-default bundle denies if ANY policy defaults deny (order-independent)', () => {
+  // Cross-bundle fail-safe: a deny default in any policy wins regardless of
+  // policy ordering. Both orderings must resolve to deny so the result can't
+  // be flipped by reordering the bundle.
+  const allowFirst = {
+    policies: [
+      mkPolicy({
+        policyId: '11111111-1111-1111-1111-111111111111',
+        rules: [rule('r1', [cond('tool_name', 'eq', 'will_not_match')])],
+        defaultEffect: 'allow',
+      }),
+      mkPolicy({
+        policyId: '22222222-2222-2222-2222-222222222222',
+        rules: [rule('r2', [cond('tool_name', 'eq', 'will_not_match')])],
+        defaultEffect: 'deny',
+      }),
+    ],
+  };
+  const denyFirst = {
+    policies: [allowFirst.policies[1], allowFirst.policies[0]],
+  };
+  for (const cfg of [allowFirst, denyFirst]) {
+    const ev = new Evaluator();
+    ev.updateBundle(mkBundle(cfg));
+    const r = ev.evaluate({ tool_name: 'echo' });
+    assert.equal(r.decision, 'deny');
+    assert.equal(r.matchedRuleId, undefined);
+  }
+});
+
+test('no rule matches → all-allow defaults resolve to allow', () => {
+  const ev = new Evaluator();
+  ev.updateBundle(
+    mkBundle({
+      policies: [
+        mkPolicy({
+          policyId: '11111111-1111-1111-1111-111111111111',
+          rules: [rule('r1', [cond('tool_name', 'eq', 'will_not_match')])],
+          defaultEffect: 'allow',
+        }),
+        mkPolicy({
+          policyId: '22222222-2222-2222-2222-222222222222',
+          rules: [rule('r2', [cond('tool_name', 'eq', 'will_not_match')])],
+          defaultEffect: 'allow',
+        }),
+      ],
+    }),
+  );
+  const r = ev.evaluate({ tool_name: 'echo' });
+  assert.equal(r.decision, 'allow');
 });
 
 // ---- Operators -------------------------------------------------------------
@@ -293,9 +345,9 @@ test('an errored policy poisons evaluation even when a sibling policy ordered fi
     }),
   );
   // First policy's allow rule matches → loop continues, hits errored
-  // policy → short-circuit DENY with POLICY_COMPILE_ERROR (fail-closed:
-  // an errored policy poisons every evaluation, even ones a prior allow
-  // would have matched).
+  // policy → short-circuit DENY with POLICY_COMPILE_ERROR (defaults to
+  // deny: an errored policy poisons every evaluation, even ones a prior
+  // allow would have matched).
   const r = ev.evaluate({ tool_name: 'echo' });
   assert.equal(r.decision, 'deny');
   assert.equal(r.code, 'POLICY_COMPILE_ERROR');
@@ -602,7 +654,7 @@ test('prototype-walking: schema rejects __proto__/constructor/prototype in field
 });
 
 test('prototype-walking: resolveField uses hasOwn (inherited props do not resolve)', () => {
-  // Even if a condition somehow bypassed the schema (e.g., a future
+  // Even if a condition somehow skipped the schema (e.g., a future
   // synthetic condition), the evaluator's resolveField guards by hasOwn.
   // We exercise the path indirectly: request inherits a `tool_name`
   // property; the eq rule should still match (own property) but the eq

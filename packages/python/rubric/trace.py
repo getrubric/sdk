@@ -167,7 +167,7 @@ class TraceUploader:
                     "trace upload rejected (%d, %s): %s",
                     res.status_code,
                     problem.type,
-                    problem.detail or problem.title,
+                    scrub_secrets(problem.detail or problem.title),
                 )
             else:
                 # Non-RFC9457 body — surface enough to triage without leaking

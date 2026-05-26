@@ -24,6 +24,7 @@ from rubric.constants import (
     DECISION_ALLOW,
     DECISION_DENY,
     DENY_REASON_AGENT_FROZEN,
+    EVAL_REQUEST_FIELD_MCP_TOOL_NAME as MCP_GATE_FIELD,
     Decision,
     RESULT_CODE_AGENT_FROZEN,
     RESULT_CODE_MCP_NOT_APPROVED,
@@ -134,8 +135,8 @@ class Evaluator:
         self._compiled_patterns: dict[int, _regex.Pattern[str]] = {}
         # Policy IDs whose document contains at least one uncompileable
         # `matches` pattern. Populated in `update_bundle`, consulted on
-        # every evaluation. Fail-closed: any request that would touch such
-        # a policy returns DENY/POLICY_COMPILE_ERROR.
+        # every evaluation. Defaults to deny: any request that would touch
+        # such a policy returns DENY/POLICY_COMPILE_ERROR.
         self._errored_policy_ids: set[str] = set()
         self._on_compile_error: Callable[[CompileErrorInfo], None] | None = (
             options.on_compile_error if options is not None else None
@@ -236,8 +237,18 @@ class Evaluator:
         # call whose server isn't approved, before policy evaluation —
         # mirrors the Node SDK core. `enforce=False` (e.g. solo installs)
         # disables the gate; older bundles default `enforce=True`.
+        #
+        # Adapters strip the `mcp__<server>__` prefix off `tool_name` so
+        # policy *conditions* match the canonical name (`query`), but they
+        # forward the RAW prefixed name in `mcp_tool_name` so this gate can
+        # still recover the server. Parse the raw name when present and fall
+        # back to `tool_name` for callers that pass the prefixed name
+        # directly (e.g. the Claude Code daemon).
         if bundle is not None and bundle.mcpAccess.enforce:
-            parsed = parse_mcp_server(request.tool_name)
+            gate_name = (
+                getattr(request, MCP_GATE_FIELD, None) or request.tool_name
+            )
+            parsed = parse_mcp_server(gate_name)
             if parsed is not None and parsed[0] not in bundle.mcpAccess.approvedServers:
                 return EvaluationResult(
                     decision=DECISION_DENY,
@@ -487,7 +498,7 @@ def _matches(
         # policy-level POLICY_COMPILE_ERROR fires earlier and we don't
         # reach this code path) or that the evaluator is being driven
         # with a condition object that didn't come from the cached
-        # bundle. Fail-closed (no match) either way.
+        # bundle. Returns no match either way.
         if actual is None:
             return False
         pattern = compiled_patterns.get(id(condition))

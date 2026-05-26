@@ -69,7 +69,7 @@ export interface RunDaemonOptions {
   /** How long to wait for the first bundle before serving traffic. */
   firstBundleTimeoutMs?: number;
   /**
-   * Local-dev escape hatch. When true, the daemon will bind the HTTP
+   * Local-dev override. When true, the daemon will bind the HTTP
    * server even if the first bundle pull never produced a bundle —
    * used by tests and by `rubric start --foreground --allow-cold-start`
    * during development against an offline Rubric API. In production
@@ -181,12 +181,11 @@ export async function runDaemon(options: RunDaemonOptions): Promise<void> {
   bundlePoller.start();
 
   // We seed the baseline pack above, so the daemon always has a safe,
-  // permissive policy set to serve and never fails closed (deny-all) or refuses
+  // permissive policy set to serve and never defaults to deny-all or refuses
   // to start. Try to pull the authoritative org bundle promptly; if the first
   // pull fails or times out, keep serving the baseline and let the poller's
-  // never-die loop catch up. (This replaces the old fail-closed cold-start
-  // behavior — a developer enrolling before any policy exists is no longer
-  // locked out.)
+  // never-die loop catch up. This keeps a developer who enrolls before any
+  // policy exists from being locked out at cold start.
   try {
     await bundlePoller.firstPullDone(
       options.firstBundleTimeoutMs ?? DEFAULT_FIRST_PULL_TIMEOUT_MS,
@@ -443,7 +442,7 @@ async function runSolo(
 
 /**
  * Read the editable local policy pack. Returns the compiled-in default pack on
- * a missing/invalid file — solo mode must NEVER fail closed (deny-all would
+ * a missing/invalid file — solo mode must NEVER default to deny-all (that would
  * break the developer's Claude Code). File shape: `{ policies: [{ id, document }] }`.
  */
 function loadLocalPack(

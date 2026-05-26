@@ -78,6 +78,10 @@ class MCPClientWrapper:
             session_id=self._session_id,
             metadata=EvaluationMetadata(input=arguments or {}),
             framework=FRAMEWORK_MCP,
+            # Forward the raw `mcp__<server>__<tool>` name so the MCP
+            # allow-list gate can check the server even though `tool_name`
+            # has been stripped to the canonical form for policy matching.
+            mcp_tool_name=name,
         )
         if result.decision == DECISION_DENY:
             reason = (

@@ -17,6 +17,8 @@ export {
 
 export { BundlePoller, type BundlePollerOptions } from './bundle.js';
 
+export { verifyBundleSignature } from './bundle-signature.js';
+
 export {
   AuditSink,
   type AuditSinkOptions,
@@ -50,8 +52,10 @@ export {
 
 export {
   AuditEventSchema,
+  BundleContentSchema,
   BundlePolicyEntrySchema,
   BundleSchema,
+  BundleSignatureSchema,
   DecisionSchema,
   PolicyConditionOperatorSchema,
   PolicyConditionSchema,
@@ -59,9 +63,12 @@ export {
   PolicyEffectSchema,
   PolicyRuleSchema,
   SdkTokenResponseSchema,
+  canonicalBundleBytes,
   type AuditEvent,
   type Bundle,
+  type BundleContent,
   type BundlePolicyEntry,
+  type BundleSignature,
   type PolicyCondition,
   type PolicyDocument,
   type PolicyRule,
@@ -71,6 +78,9 @@ export {
 export {
   ALLOWED_HOST_EXACT,
   ALLOWED_HOST_SUFFIX,
+  BUNDLE_SIGNATURE_ALG,
+  BUNDLE_SIGNING_KEY_ID,
+  BUNDLE_SIGNING_PUBLIC_KEY_SPKI_B64,
   DECISION_ALLOW,
   DECISION_DENY,
   DECISION_VALUES,

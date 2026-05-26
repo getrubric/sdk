@@ -25,7 +25,8 @@ test('validateApiUrl: accepts deep subdomain https://eu.api.rubric-app.com', () 
 // The other test files in this suite need to construct primitives against
 // a local mock HTTP server, so the package.json test script sets
 // RUBRIC_INTERNAL_ALLOW_LOOPBACK_FOR_TESTS=1. The next three tests verify
-// the production behavior (no escape hatch), so we unset it for them.
+// the production behavior (no test-only loopback allowance), so we unset it
+// for them.
 function withoutLoopbackEscape(fn) {
   const before = process.env.RUBRIC_INTERNAL_ALLOW_LOOPBACK_FOR_TESTS;
   try {
@@ -60,7 +61,7 @@ test('validateApiUrl: rejects https://localhost (production behavior)', () => {
   });
 });
 
-test('escape-hatch env var lets loopback through (internal test mode only)', () => {
+test('test-only loopback allowance lets loopback through (internal test mode only)', () => {
   const before = process.env.RUBRIC_INTERNAL_ALLOW_LOOPBACK_FOR_TESTS;
   try {
     process.env.RUBRIC_INTERNAL_ALLOW_LOOPBACK_FOR_TESTS = '1';
@@ -85,9 +86,9 @@ test('validateApiUrl: rejects third-party hosts', () => {
 });
 
 test('validateApiUrl: rejects lookalike hosts (suffix-without-dot)', () => {
-  // `attacker-rubric-app.com` contains `rubric-app.com` as a suffix
+  // `lookalike-rubric-app.com` contains `rubric-app.com` as a suffix
   // but is NOT a subdomain. The dot prefix is load-bearing here.
-  const err = validateApiUrl('https://attacker-rubric-app.com');
+  const err = validateApiUrl('https://lookalike-rubric-app.com');
   assert.notEqual(err, null);
   assert.match(err, /not a Rubric host/);
 });

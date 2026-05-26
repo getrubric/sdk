@@ -9,7 +9,12 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 
-import { bootstrapTokenStore, DEFAULT_API_URL } from '@rubric-app/core';
+import {
+  assertValidApiUrl,
+  bootstrapTokenStore,
+  DEFAULT_API_URL,
+  validateApiUrl,
+} from '@rubric-app/core';
 
 import { ensureDirMode } from '../config/fs-secure.js';
 import { defaultPaths, type Paths } from '../config/paths.js';
@@ -59,6 +64,9 @@ export async function runLogin(options: LoginOptions = {}): Promise<void> {
 
   const apiUrl =
     options.apiUrl ?? process.env['RUBRIC_API_URL'] ?? DEFAULT_API_URL;
+  // Validate that the API URL is an https Rubric host before using it for the
+  // device-flow requests. Throws synchronously before any network call.
+  assertValidApiUrl(apiUrl);
   const intent = options.intent ?? null;
 
   // ---- start ---------------------------------------------------------------
@@ -67,11 +75,19 @@ export async function runLogin(options: LoginOptions = {}): Promise<void> {
     clientInfo: { hostname: os.hostname(), platform: process.platform },
   });
 
-  const opened = tryOpenBrowser(start.verificationUri);
+  // The verification URI is server-supplied. Only hand it to the OS browser
+  // opener if it validates as an https:// URL on a Rubric host; otherwise we
+  // fall back to printing it for the user to open manually.
+  const verificationUriValid = validateApiUrl(start.verificationUri) === null;
+  const opened = verificationUriValid ? tryOpenBrowser(start.verificationUri) : false;
   process.stdout.write(
     `${info('Approve this connection in your browser:')}\n` +
       `  ${dim(start.verificationUri)}\n` +
-      (opened ? '' : `  ${warn('(open the link above manually)')}\n`) +
+      (verificationUriValid
+        ? opened
+          ? ''
+          : `  ${warn('(open the link above manually)')}\n`
+        : `  ${warn('(open the link above manually)')}\n`) +
       `  Code: ${dim(start.userCode)}\n\n` +
       `${info('Waiting for approval…')} ${dim('(Ctrl-C to cancel)')}\n`,
   );
@@ -108,7 +124,21 @@ export async function runLogin(options: LoginOptions = {}): Promise<void> {
   }
 
   // ---- enroll (reuse the existing identity path) ---------------------------
-  const resolvedApiUrl = approved.apiUrl || apiUrl;
+  // The server may hand back its own canonical API URL; prefer it, but
+  // validate it first — it is used for enrollment + audit traffic. Accept it
+  // only if it is an https Rubric host; otherwise fall back to the
+  // already-validated `apiUrl`.
+  let resolvedApiUrl = apiUrl;
+  if (approved.apiUrl) {
+    if (validateApiUrl(approved.apiUrl) === null) {
+      resolvedApiUrl = approved.apiUrl;
+    } else {
+      process.stderr.write(
+        `${fail(`server returned an invalid API URL (${approved.apiUrl}) — refusing to connect`)}\n`,
+      );
+      process.exit(1);
+    }
+  }
   process.stdout.write(`${ok(`approved — connecting as ${dim(approved.agentName)}`)}\n`);
   let agentId: string;
   try {
@@ -137,7 +167,7 @@ export async function runLogin(options: LoginOptions = {}): Promise<void> {
   // ---- auto-publish local pack (new workspace only) ------------------------
   // Done BEFORE starting the daemon so the connected bundle is populated when
   // the daemon's first poll lands — otherwise a brand-new org's empty bundle
-  // would fail closed. Driven by what the server actually did (`created`), not
+  // would default to deny. Driven by what the server actually did (`created`), not
   // the client's intent, so creating a workspace from a bare `rubric login`
   // still seeds the pack.
   if (approved.created) {

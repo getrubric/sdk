@@ -21,6 +21,7 @@ import {
   HTTP_UNAUTHORIZED,
   assertValidApiUrl,
 } from './constants.js';
+import { verifyBundleSignature } from './bundle-signature.js';
 import { GovernanceError, parseProblemDetails } from './errors.js';
 import { TokenStore } from './identity.js';
 import { BundleSchema, type Bundle } from './types.js';
@@ -86,7 +87,7 @@ export class BundlePoller {
   private _lastBundleChangeAt: Date | null = null;
   // Reasons we rejected an incoming pull as non-monotonic (older version
   // or older `builtAt`). Exposed so `rubric doctor` can surface "we're
-  // seeing rollback attempts" without spamming `onError`.
+  // seeing rollbacks" without spamming `onError`.
   private _lastRejectedBundleAt: Date | null = null;
   private _lastRejectionReason: string | null = null;
   private _stopController: AbortController | null = null;
@@ -122,9 +123,9 @@ export class BundlePoller {
    * Null until the first successful pull.
    *
    * Use this to detect a stuck poller. Combined with `lastBundleChangeAt`
-   * to detect a "304-forever" attack: if `lastPullAt` is recent but
-   * `lastBundleChangeAt` is hours old, the server may be suppressing
-   * legitimate bundle updates.
+   * to detect a "304-forever" condition: if `lastPullAt` is recent but
+   * `lastBundleChangeAt` is hours old, the server may not be delivering
+   * bundle updates.
    */
   get lastPullAt(): Date | null {
     return this._lastPullAt;
@@ -244,6 +245,22 @@ export class BundlePoller {
 
     const json: unknown = await res.json();
     const bundle = BundleSchema.parse(json);
+
+    // Authenticity gate. A valid schema + recomputable contentHash only proves
+    // the bytes are well-formed, not that they came from the control plane.
+    // Verify the Ed25519 signature against the pinned public key before we let
+    // this bundle become authoritative; if it doesn't verify, keep the last
+    // good bundle (or, with no policies, default-deny) and don't adopt the
+    // incoming one.
+    const sigError = verifyBundleSignature(bundle);
+    if (sigError !== null) {
+      this._lastRejectedBundleAt = new Date();
+      this._lastRejectionReason = `signature rejected: ${sigError}`;
+      this._onError(
+        new GovernanceError(`bundle signature verification failed: ${sigError}`),
+      );
+      return;
+    }
 
     // Record the pull timestamp regardless of whether the bundle changed —
     // a successful HTTP response is what proves the poller is healthy.

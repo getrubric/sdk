@@ -78,7 +78,7 @@ test('buildSystemdService: still accepts plain absolute paths with spaces', () =
   assert.match(spec.unitContent, /ExecStart=\/path\\ with\\ space\/node /);
 });
 
-test('buildSystemdService: doubles % to %% to defeat systemd specifier expansion', () => {
+test('buildSystemdService: doubles % to %% to avoid systemd specifier expansion', () => {
   // A path like /home/%u/node would otherwise have systemd expand %u to
   // the username. Our validator doesn't ban % (paths sometimes contain
   // legitimate %), so the escaper doubles it.

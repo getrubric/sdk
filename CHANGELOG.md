@@ -2,6 +2,12 @@
 
 All notable changes to `@rubric-app/core` and `@rubric-app/claude-code` are recorded here.
 
+## 0.3.1 — 2026-05-25
+
+### Fixed
+
+- **Git seatbelt** (`@rubric-app/claude-code`): `shadowGitDir` now hashes the *realpath* of the project root instead of the textual path. The daemon snapshots from the hook's reported cwd while `rubric undo` resolves `process.cwd()`; when a repo was reached through a symlink (e.g. macOS `/tmp` → `/private/tmp`, or a symlinked home), those two views hashed to different shadow repos and `rubric undo` reported "No seatbelt snapshots yet" despite a snapshot having been taken. Both paths now resolve to one shadow.
+
 ## 0.3.0 — 2026-05-25
 
 Consolidates features that had been developed in the platform monorepo into this

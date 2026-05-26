@@ -80,7 +80,12 @@ export function resolveProjectRoot(cwd: string): string | null {
 
 /** GIT_DIR of the shadow repo for a given project root. */
 export function shadowGitDir(paths: Paths, projectRoot: string): string {
-  const hash = createHash('sha256').update(path.resolve(projectRoot)).digest('hex').slice(0, 12);
+  // Hash the *realpath* so the daemon (which snapshots from the hook's cwd)
+  // and `rubric undo` (which resolves from process.cwd()) land on the same
+  // shadow repo even when they reach the project through different symlinks —
+  // e.g. macOS `/tmp` → `/private/tmp`. Hashing the textual `path.resolve`
+  // would split those into two shadows and lose the undo history.
+  const hash = createHash('sha256').update(realOrSelf(projectRoot)).digest('hex').slice(0, 12);
   return path.join(paths.seatbeltDir, hash, 'git');
 }
 

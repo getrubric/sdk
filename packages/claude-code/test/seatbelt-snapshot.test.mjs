@@ -130,6 +130,19 @@ test('snapshot labels the commit with the prompt from the transcript', { skip: !
   assert.equal(snap.prompt, 'wipe the build and start over');
 });
 
+test('shadowGitDir is symlink-stable: a path and a symlink to it map to one shadow', () => {
+  // Regression: the daemon snapshots from the hook's cwd (may be /tmp/x) while
+  // `rubric undo` resolves process.cwd() (/private/tmp/x on macOS). If
+  // shadowGitDir hashed the textual path they'd split into two shadows and
+  // undo would find nothing. Hashing the realpath keeps them unified.
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), 'rubric-real-'));
+  const aliasParent = fs.mkdtempSync(path.join(os.tmpdir(), 'rubric-alias-'));
+  const alias = path.join(aliasParent, 'link');
+  fs.symlinkSync(real, alias);
+  const paths = { seatbeltDir: '/x/seatbelt' };
+  assert.equal(shadowGitDir(paths, alias), shadowGitDir(paths, real));
+});
+
 test('resolveProjectRoot returns null outside any repo', () => {
   const lone = fs.mkdtempSync(path.join(os.tmpdir(), 'rubric-norepo-'));
   // os.tmpdir() itself is not a git repo, so walking up finds nothing.

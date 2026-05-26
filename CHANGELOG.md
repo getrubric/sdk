@@ -2,6 +2,21 @@
 
 All notable changes to `@rubric-app/core` and `@rubric-app/claude-code` are recorded here.
 
+## 0.4.0 (`@rubric-app/claude-code`) / 0.3.0 (`@rubric-app/core`) — 2026-05-25
+
+### Added
+
+- **Bundle signature verification** (`@rubric-app/core`): network-fetched policy bundles now carry an Ed25519 detached signature over their canonical content. The SDK verifies it against a public key pinned at build time before a bundle becomes authoritative; a bundle that doesn't verify is dropped and the last good bundle (or default-deny) keeps governing. Resolves the bundle-signing item listed under 0.1.0's known limitations. The in-process offline baseline pack is unaffected (it is never fetched).
+
+### Changed
+
+- **Default-pack policy coverage** (`@rubric-app/claude-code`): destructive-command matching now recognizes more shell forms — `rm` with reordered / long / quoted flags and parent-directory targets, plus `find -delete` and `shred`; credential-file paths matched regardless of read verb; cloud instance-metadata addresses in their common encodings (decimal/hex/host-suffix); download-then-run in addition to pipe-to-shell; and `git push --force` with an interposed git global-option block.
+- **Seatbelt classifier** (`@rubric-app/claude-code`): normalizes git global options (`-C`, `-c`, `--git-dir`, …) and leading environment assignments before matching, so destructive git invocations are recognized regardless of how they are framed.
+- **`rubric login`** (`@rubric-app/claude-code`): the API URL and the server-returned verification URL are validated as `https` Rubric hosts before any network call or browser open.
+- **Daemon bind** (`@rubric-app/claude-code`): restricted to the numeric loopback literals `127.0.0.1` / `::1`.
+- **Default-effect resolution** (`@rubric-app/core`): when no rule matches, the default decision is resolved across all policies order-independently (deny if any policy defaults to deny, else ask if any defaults to ask, else allow).
+- Published packages ship compiled `dist/` only (`src/` is no longer included in the npm tarball).
+
 ## 0.3.1 — 2026-05-25
 
 ### Fixed

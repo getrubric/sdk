@@ -117,6 +117,11 @@ async function checkRefresh(paths: DoctorPaths): Promise<CheckResult> {
   } catch {
     return { pass: false, skipped: true, message: 'no config; skipping' };
   }
+  // Solo mode has no account, identity, or control plane — there's nothing to
+  // refresh against. Report as a neutral skip rather than a failure.
+  if (config.mode === 'solo') {
+    return { pass: true, skipped: true, message: 'solo mode — no account or control plane' };
+  }
   try {
     const res = await fetch(`${config.apiUrl}/v1/identities/refresh`, {
       method: 'POST',
@@ -177,6 +182,31 @@ function checkSettingsJson(paths: DoctorPaths): CheckResult {
 }
 
 async function checkBundleFresh(paths: DoctorPaths): Promise<CheckResult> {
+  // Solo mode pulls no bundle from a control plane — it enforces the local
+  // editable pack. Verify that instead of hitting /v1/status (which solo
+  // doesn't serve). Solo never fails closed: a missing/invalid pack falls back
+  // to the built-in default, so those states are healthy, not failures.
+  let config: ReturnType<typeof readConfig> | null = null;
+  try {
+    config = readConfig(paths.configFile);
+  } catch {
+    /* fall through to the connected path's own skip handling */
+  }
+  if (config?.mode === 'solo') {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(paths.policiesFile, 'utf8')) as {
+        policies?: unknown[];
+      };
+      const count = Array.isArray(parsed.policies) ? parsed.policies.length : 0;
+      if (count === 0) {
+        return { pass: true, skipped: true, message: 'using built-in default pack' };
+      }
+      return { pass: true, message: `${count} policy/policies (local pack)` };
+    } catch {
+      return { pass: true, skipped: true, message: 'no/invalid policies.json — using built-in default pack' };
+    }
+  }
+
   const port = readDaemonPort(paths.daemonPortFile);
   if (port === null) {
     return { pass: false, skipped: true, message: 'no daemon port; skipping' };
